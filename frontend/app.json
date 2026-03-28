@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "VoiceTrace",
+    "slug": "voicetrace",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "platforms": ["ios", "android"],
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow VoiceTrace to access your microphone for voice ledger recording."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.voicetrace.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "VoiceTrace needs microphone access to record your business transactions."
+      }
+    },
+    "android": {
+      "package": "com.voicetrace.app",
+      "permissions": ["RECORD_AUDIO"]
+    }
+  }
+}
