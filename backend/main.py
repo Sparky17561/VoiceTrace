@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Depends, BackgroundTasks, HTTPException, status, Request
+from fastapi import FastAPI, UploadFile, File, Depends, BackgroundTasks, HTTPException, status, Request, Form
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -10,6 +12,9 @@ import os
 import json
 import random
 import uuid
+import analytics_engine
+import statistics
+import ask_service
 from datetime import datetime, timedelta
 from fastapi.staticfiles import StaticFiles
 from collections import defaultdict
@@ -23,7 +28,6 @@ from schemas import (
 )
 from groq_service import process_audio_pipeline, process_text_pipeline, translate_search_query
 from auth import get_current_user, get_password_hash, verify_password, create_access_token
-from ask_service import process_ask
 from pdf_service import generate_full_report
 
 # ── Initialize DB tables ──
@@ -235,12 +239,23 @@ def _enforce_menu_check(result: dict, menu_items: list):
     def get_fuzzy_match(raw_name):
         if not raw_name: return None
         low = raw_name.lower()
-        # Direct check
-        if low in valid_names: return next(m.item_name for m in menu_items if m.item_name.lower() == low)
-        # Fuzzy match
-        matches = difflib.get_close_matches(low, valid_names, n=1, cutoff=0.7)
+        # 1. Direct exact match
+        if low in valid_names:
+            return next(m.item_name for m in menu_items if m.item_name.lower() == low)
+        # 2. Space-stripped exact match ("vada pav" <-> "vadapav")
+        low_ns = low.replace(" ", "")
+        for m in menu_items:
+            if m.item_name.lower().replace(" ", "") == low_ns:
+                return m.item_name
+        # 3. Fuzzy match (lower cutoff = more forgiving)
+        matches = difflib.get_close_matches(low, valid_names, n=1, cutoff=0.5)
         if matches:
             return next(m.item_name for m in menu_items if m.item_name.lower() == matches[0])
+        # 4. Space-stripped fuzzy match
+        stripped_valid = [vn.replace(" ", "") for vn in valid_names]
+        matches_ns = difflib.get_close_matches(low_ns, stripped_valid, n=1, cutoff=0.5)
+        if matches_ns:
+            return next(m.item_name for m in menu_items if m.item_name.lower().replace(" ", "") == matches_ns[0])
         return None
 
     if result.get("intent") == "transaction":
@@ -482,7 +497,7 @@ def search_entries(stall_id: int, query: str, user: models.User = Depends(get_cu
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/analytics/daily-summary")
-def daily_summary(stall_id: int, days: int = 7, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     stall = db.query(models.Stall).filter(models.Stall.id == stall_id, models.Stall.user_id == user.id).first()
     if not stall: raise HTTPException(404, "Stall not found")
 
@@ -492,148 +507,352 @@ def daily_summary(stall_id: int, days: int = 7, user: models.User = Depends(get_
         models.AudioSession.day_date >= cutoff
     ).order_by(models.AudioSession.day_date.desc()).all()
 
-    daily = defaultdict(lambda: {"items": {}, "total_revenue": 0, "total_expense": 0, "stockout_items": []})
+    daily_data = defaultdict(lambda: {"items": {}, "total_revenue": 0, "total_expense": 0, "stockout_items": []})
+    item_histories = defaultdict(list)
+    revenue_series = []
+    expense_series = []
 
     for session in sessions:
         d = session.day_date
-        daily[d]["total_revenue"] += session.total_revenue or 0
-        daily[d]["total_expense"] += session.total_expense or 0
+        daily_data[d]["total_revenue"] += session.total_revenue or 0
+        daily_data[d]["total_expense"] += session.total_expense or 0
         for entry in session.entries:
             name = entry.item_name or "Unknown"
-            if name not in daily[d]["items"]:
-                daily[d]["items"][name] = {"revenue": 0, "stockout": False, "lost_sales": False}
+            if name not in daily_data[d]["items"]:
+                daily_data[d]["items"][name] = {"revenue": 0, "stockout": False, "lost_sales": False}
             if entry.entry_type == "REVENUE":
-                daily[d]["items"][name]["revenue"] += entry.value or 0
-            if entry.stockout_flag:
-                daily[d]["items"][name]["stockout"] = True
-                if name not in daily[d]["stockout_items"]:
-                    daily[d]["stockout_items"].append(name)
-            if entry.lost_sales_flag:
-                daily[d]["items"][name]["lost_sales"] = True
+                daily_data[d]["items"][name]["revenue"] += entry.value or 0
+            if entry.stockout_flag: daily_data[d]["items"][name]["stockout"] = True
+            if entry.lost_sales_flag: daily_data[d]["items"][name]["lost_sales"] = True
 
-    result = []
-    for date, data in sorted(daily.items(), reverse=True):
-        result.append({
+    # ─────────────────────────────────────────────────────────────────────────────
+    # ANALYTICS ENGINE PROCESSING
+    # ─────────────────────────────────────────────────────────────────────────────
+    all_dates = sorted(daily_data.keys())
+    revenue_series = [daily_data[dt]["total_revenue"] for dt in all_dates]
+    expense_series = [daily_data[dt]["total_expense"] for dt in all_dates]
+
+    # MAD Anomaly Detection
+    rev_anomalies = analytics_engine.detect_mad_anomalies(revenue_series)
+    exp_anomalies = analytics_engine.detect_mad_anomalies(expense_series)
+
+    engine_insights = {
+        "anomalies": [],
+        "demand_highlights": [],
+        "suggestions": []
+    }
+
+    # Format anomalies
+    for idx in rev_anomalies:
+        engine_insights["anomalies"].append(f"Revenue was unusually {'high' if revenue_series[idx] > statistics.median(revenue_series) else 'low'} on {all_dates[idx]}.")
+    for idx in exp_anomalies:
+        engine_insights["anomalies"].append(f"Expenses were unusually high on {all_dates[idx]}.")
+
+    # Item Demand insights for the period
+    items_encountered = set()
+    for d_data in daily_data.values():
+        items_encountered.update(d_data["items"].keys())
+
+    for item in items_encountered:
+        # Build historic series for EWMA baseline
+        hist = [daily_data[dt]["items"].get(item, {}).get("revenue", 0) for dt in all_dates]
+        baseline = analytics_engine.calculate_ewma(hist)
+        
+        # Check all dates for highlights (not just today)
+        for dt in all_dates:
+            idat = daily_data[dt]["items"].get(item, {})
+            if idat.get("stockout") or idat.get("lost_sales"):
+                est = analytics_engine.estimate_counterfactual_demand(
+                    idat.get("revenue", 0), baseline, 
+                    idat.get("stockout"), idat.get("lost_sales")
+                )
+                if est["lost_sales"] > 0:
+                    # Avoid duplicates for same item
+                    if not any(h["item"] == item for h in engine_insights["demand_highlights"]):
+                        engine_insights["demand_highlights"].append({
+                            "item": item,
+                            "observed": idat.get("revenue", 0),
+                            "estimated": est["estimated_demand"],
+                            "lost": est["lost_sales"],
+                            "reason": est["reason"],
+                            "date": dt
+                        })
+            
+        # Suggestion logic for the item (if frequently out or rising)
+        stockout_count = sum(1 for dt in all_dates if daily_data[dt]["items"].get(item, {}).get("stockout"))
+        stockout_freq = stockout_count / len(all_dates) if all_dates else 0
+        
+        # Simple trend
+        trend = "stable"
+        if len(hist) >= 2:
+            recent_avg = (hist[-1] + (hist[-2] if len(hist)>1 else 0)) / (2 if len(hist)>1 else 1)
+            if recent_avg > baseline * 1.1: trend = "up"
+            elif recent_avg < baseline * 0.9: trend = "down"
+
+        sug = analytics_engine.generate_business_suggestions(item, baseline, baseline, trend, stockout_freq)
+        if sug["percentage"] != 0:
+            if not any(s["suggestion"] == sug["suggestion"] for s in engine_insights["suggestions"]):
+                engine_insights["suggestions"].append(sug)
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # COMPILE FINAL OUTPUT
+    # ─────────────────────────────────────────────────────────────────────────────
+    days_list = []
+    for date, data in sorted(daily_data.items(), reverse=True):
+        days_list.append({
             "date": date,
             "items": data["items"],
             "total_revenue": round(data["total_revenue"], 2),
             "total_expense": round(data["total_expense"], 2),
             "profit": round(data["total_revenue"] - data["total_expense"], 2),
-            "stockout_items": data["stockout_items"],
+            "stockout_items": [n for n, items in data["items"].items() if items.get("stockout")],
         })
-    return result
+
+    # Add Recommended Govt Scheme
+    monthly_profit = sum(d["profit"] for d in days_list[:30])
+    monthly_revenue = sum(d["total_revenue"] for d in days_list[:30])
+    engine_insights["recommended_scheme"] = analytics_engine.get_scheme_recommendation(monthly_profit, monthly_revenue)
+
+    return {
+        "days": days_list,
+        "engine_insights": engine_insights
+    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASK ENDPOINT — Multi-turn Voice Brain
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/ask")
-def ask(req: AskRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    stall = db.query(models.Stall).filter(models.Stall.id == req.stall_id, models.Stall.user_id == user.id).first()
+def ask(
+    stall_id: int = Form(...),
+    text: Optional[str] = Form(None),
+    session_context: Optional[str] = Form(None),
+    audio: Optional[UploadFile] = File(None),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    stall = db.query(models.Stall).filter(models.Stall.id == stall_id, models.Stall.user_id == user.id).first()
     if not stall: raise HTTPException(404, "Stall not found")
 
-    # Fetch recent daily summary for context
+    # If audio provided, transcribe first
+    transcript = text
+    if audio:
+        from groq_service import client as groq_client
+        tmp_name = f"ask_{uuid.uuid4()}.m4a"
+        with open(tmp_name, "wb") as f:
+            f.write(audio.file.read())
+        try:
+            with open(tmp_name, "rb") as f:
+                ts = groq_client.audio.transcriptions.create(file=(tmp_name, f.read()), model="whisper-large-v3-turbo", language="hi")
+                transcript = ts.text
+        finally:
+            if os.path.exists(tmp_name): os.remove(tmp_name)
+
+    if not transcript:
+        raise HTTPException(400, "No text or audio provided")
+
+    # 1. Fetch Comprehensive Context
+    menu = [{"id": m.id, "item_name": m.item_name, "price": m.price_per_unit} for m in stall.menu_items]
+    
     cutoff = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
-    sessions = db.query(models.AudioSession).filter(
-        models.AudioSession.stall_id == req.stall_id,
-        models.AudioSession.day_date >= cutoff
-    ).all()
+    sessions = db.query(models.AudioSession).filter(models.AudioSession.stall_id == stall_id, models.AudioSession.day_date >= cutoff).all()
+    
+    # ── POPULATE SUMMARY ──
     daily = defaultdict(lambda: {"revenue": 0, "expense": 0, "stockout_items": []})
     for s in sessions:
         daily[s.day_date]["revenue"] += s.total_revenue or 0
         daily[s.day_date]["expense"] += s.total_expense or 0
         for e in s.entries:
-            if e.stockout_flag and e.item_name and e.item_name not in daily[s.day_date]["stockout_items"]:
+            if e.stockout_flag and e.item_name:
                 daily[s.day_date]["stockout_items"].append(e.item_name)
-    daily_summary_list = [
-        {"date": d, "total_revenue": v["revenue"], "total_expense": v["expense"],
-         "profit": v["revenue"] - v["expense"], "stockout_items": v["stockout_items"]}
+    
+    summary_data = [
+        {"date": d, "revenue": v["revenue"], "expense": v["expense"], "stockout": v["stockout_items"]}
         for d, v in sorted(daily.items(), reverse=True)
     ]
+    
+    udhari_list = [{"id": p.id, "name": p.name, "pending": sum(e.amount for e in p.entries if e.status=="pending")} for p in stall.udhari_persons]
 
-    # Fetch udhari summary
-    persons = db.query(models.UdhariPerson).filter(models.UdhariPerson.stall_id == req.stall_id).all()
-    udhari_list = []
-    for p in persons:
-        pending = sum(e.amount for e in p.entries if e.status == "pending" and e.direction == "given")
-        udhari_list.append({"name": p.name, "pending_total": pending, "id": p.id})
+    context = {
+        "menu": menu,
+        "summary": summary_data,
+        "udhari": udhari_list,
+        "session_history": json.loads(session_context) if session_context else []
+    }
 
-    # Call the Ask brain
-    result = process_ask(req.text, daily_summary_list, udhari_list, req.session_context)
+    # 2. Call the new Schema-Aware Ask Brain
+    raw_result = ask_service.process_ask(transcript, context)
+    
+    intent = raw_result.get("intent")
+    action_data = raw_result.get("action_data", {})
+    reply = raw_result.get("reply", "Understood.")
 
-    # Auto-execute side effects based on action_data
+    # ── PREVIEW MODE for ledger intents ────────────────────────────────────────
+    # For sales/expenses/udhari, translate to standard schema, run menu check,
+    # and return show_preview=True so the frontend shows a confirmation popup.
+    # The DB write only happens later via /confirm-entry.
+    if intent == "log_transaction":
+        entries = []
+        tr, te = 0, 0
+        for e in action_data.get("entries", []):
+            amt = e.get("amount", 0)
+            ety = e.get("type", "REVENUE")
+            if ety == "REVENUE": tr += amt
+            else: te += amt
+            entries.append({"entry_type": ety, "item_name": e.get("item", ""), "value": amt, "type": "exact"})
+        preview_result = {
+            "intent": "transaction",
+            "raw_text": transcript,
+            "data": {"raw_text": transcript, "insight": reply, "entries": entries, "profit": {"value": tr - te}}
+        }
+        # No menu check here — the popup IS the confirmation. Menu check only applies to text /process-text-preview.
+        return {"intent": "transaction", "reply": reply, "show_preview": True, "result": preview_result}
+
+    elif intent == "add_udhari":
+        preview_result = {
+            "intent": "udhari",
+            "raw_text": transcript,
+            "data": {
+                "person_name": action_data.get("person_name", ""),
+                "amount": action_data.get("amount", 0),
+                "item": action_data.get("item", ""),
+                "direction": action_data.get("direction", "given")
+            }
+        }
+        return {"intent": "udhari", "reply": reply, "show_preview": True, "result": preview_result}
+    # ─────────────────────────────────────────────────────────────────────────
+
+    result = raw_result
+    # 3. Dispatcher Logic (Writes to DB directly for non-ledger intents)
     action_taken = None
-    action_data = result.get("action_data")
-    if action_data:
-        atype = action_data.get("type", "")
-        if atype == "udhari_add":
-            person_name = action_data.get("person_name", "")
-            amount = action_data.get("amount", 0)
-            direction = action_data.get("direction", "given")
-            if person_name and amount > 0:
-                person = db.query(models.UdhariPerson).filter(
-                    models.UdhariPerson.stall_id == req.stall_id,
-                    models.UdhariPerson.name.ilike(person_name)
-                ).first()
-                if not person:
-                    person = models.UdhariPerson(stall_id=req.stall_id, name=person_name)
-                    db.add(person); db.commit(); db.refresh(person)
-                entry = models.UdhariEntry(
-                    person_id=person.id, stall_id=req.stall_id,
-                    item=action_data.get("item"), amount=amount, direction=direction
-                )
-                db.add(entry); db.commit()
-                action_taken = {"type": "udhari_added", "person": person_name, "amount": amount}
+    
+    if intent == "add_item" and not result.get("follow_up_needed"):
+        name = action_data.get("item_name")
+        price = action_data.get("price")
+        if name and price:
+            new_item = models.MenuItem(stall_id=stall_id, item_name=name, price_per_unit=float(price))
+            db.add(new_item); db.commit(); db.refresh(new_item)
+            action_taken = f"Added {name} at ₹{price}"
 
-        elif atype == "udhari_pay":
-            person_name = action_data.get("person_name", "")
-            amount = action_data.get("amount", 0)
-            if person_name:
-                person = db.query(models.UdhariPerson).filter(
-                    models.UdhariPerson.stall_id == req.stall_id,
-                    models.UdhariPerson.name.ilike(person_name)
-                ).first()
-                if person:
-                    pending = [e for e in person.entries if e.status == "pending"]
-                    total_paid = 0
-                    today_date = datetime.utcnow().date().isoformat()
-                    items_list = []
+    elif intent == "mark_paid":
+        p_name = action_data.get("person_name")
+        if p_name:
+            import difflib
+            persons = db.query(models.UdhariPerson).filter(models.UdhariPerson.stall_id == stall_id).all()
+            person = None
+            if persons:
+                valid_names = [p.name.lower() for p in persons]
+                matches = difflib.get_close_matches(p_name.lower(), valid_names, n=1, cutoff=0.5)
+                if matches:
+                    person = next(p for p in persons if p.name.lower() == matches[0])
+
+            if person:
+                today_date = datetime.utcnow().date().isoformat()
+                total_settled = 0
+                items_list = []
+                for entry in person.entries:
+                    if entry.status == "pending" and entry.direction == "given":
+                        entry.status = "paid"
+                        total_settled += entry.amount
+                        if entry.item: items_list.append(entry.item)
+                
+                if total_settled > 0:
+                    session = db.query(models.AudioSession).filter(
+                        models.AudioSession.stall_id == stall_id,
+                        models.AudioSession.day_date == today_date
+                    ).first()
+                    if not session:
+                        session = models.AudioSession(stall_id=stall_id, day_date=today_date)
+                        db.add(session); db.commit(); db.refresh(session)
                     
-                    for e in pending:
-                        e.status = "paid"
-                        if e.direction == "given":
-                            total_paid += e.amount
-                            if e.item: items_list.append(e.item)
-                            
-                    if total_paid > 0:
-                        session = db.query(models.AudioSession).filter(
-                            models.AudioSession.stall_id == req.stall_id,
-                            models.AudioSession.day_date == today_date
-                        ).first()
-                        if not session:
-                            session = models.AudioSession(stall_id=req.stall_id, day_date=today_date)
-                            db.add(session); db.commit(); db.refresh(session)
-                        
-                        items_str = ", ".join(items_list[:3]) + ("..." if len(items_list) > 3 else "")
-                        new_entry = models.SessionEntry(
-                            session_id=session.id,
-                            entry_type="REVENUE",
-                            item_name=f"{person.name} paid bill: {items_str}",
-                            value=total_paid,
-                            amount_type="exact"
-                        )
-                        db.add(new_entry)
-                        session.total_revenue = (session.total_revenue or 0) + total_paid
-                        session.profit_value = (session.profit_value or 0) + total_paid
-                    
+                    items_str = ", ".join(items_list[:3]) + ("..." if len(items_list) > 3 else "")
+                    new_entry = models.SessionEntry(
+                        session_id=session.id,
+                        entry_type="REVENUE",
+                        item_name=f"{person.name} paid bill: {items_str}",
+                        value=total_settled, amount_type="exact"
+                    )
+                    db.add(new_entry)
+                    session.total_revenue = (session.total_revenue or 0) + total_settled
                     db.commit()
-                    action_taken = {"type": "udhari_paid", "person": person_name}
+                    action_taken = f"Settled udhari for {person.name} (₹{total_settled})"
+                else:
+                    action_taken = f"No pending credit found for {person.name}."
+
+    elif intent == "partial_payment":
+        p_name = action_data.get("person_name")
+        raw_amt = action_data.get("amount", 0)
+        try:
+            paid_amt = float(raw_amt)
+        except ValueError:
+            paid_amt = 0
+            
+        if p_name and paid_amt > 0:
+            import difflib
+            persons = db.query(models.UdhariPerson).filter(models.UdhariPerson.stall_id == stall_id).all()
+            person = None
+            if persons:
+                valid_names = [p.name.lower() for p in persons]
+                matches = difflib.get_close_matches(p_name.lower(), valid_names, n=1, cutoff=0.5)
+                if matches:
+                    person = next(p for p in persons if p.name.lower() == matches[0])
+
+            if person:
+                today_date = datetime.utcnow().date().isoformat()
+                remaining = paid_amt
+                settled = 0
+                # Deduct from oldest pending entries first
+                for entry in sorted(person.entries, key=lambda e: e.id):
+                    if entry.status == "pending" and entry.direction == "given" and remaining > 0:
+                        if entry.amount <= remaining:
+                            remaining -= entry.amount
+                            settled += entry.amount
+                            entry.status = "paid"
+                        else:
+                            # Partial deduction on this entry
+                            entry.amount -= remaining
+                            settled += remaining
+                            remaining = 0
+                
+                if settled > 0:
+                    session = db.query(models.AudioSession).filter(
+                        models.AudioSession.stall_id == stall_id,
+                        models.AudioSession.day_date == today_date
+                    ).first()
+                    if not session:
+                        session = models.AudioSession(stall_id=stall_id, day_date=today_date)
+                        db.add(session); db.commit(); db.refresh(session)
+                    session.total_revenue = (session.total_revenue or 0) + settled
+                    db.add(models.SessionEntry(
+                        session_id=session.id, entry_type="REVENUE",
+                        item_name=f"{person.name} partial payment", value=settled, amount_type="exact"
+                    ))
+                    db.commit()
+                    action_taken = f"₹{settled} received from {person.name}"
+                else:
+                    action_taken = f"No pending credit found for {person.name}."
+
+
+    # 4. Wrap up messages
+    um = models.ChatMessage(stall_id=stall_id, day_date=datetime.utcnow().date().isoformat(), role="user", content=transcript)
+    if action_taken:
+        bm = models.ChatMessage(stall_id=stall_id, day_date=datetime.utcnow().date().isoformat(), role="assistant", content=action_taken, message_type="action_card")
+    else:
+        bm = models.ChatMessage(stall_id=stall_id, day_date=datetime.utcnow().date().isoformat(), role="assistant", content=reply, message_type="text")
+    db.add(um); db.add(bm); db.commit(); db.refresh(um); db.refresh(bm)
 
     return {
-        "intent": result["intent"],
-        "reply": result["reply"],
-        "follow_up": result.get("follow_up"),
+        "intent": intent,
+        "reply": reply,
         "action_taken": action_taken,
+        "user_message": {
+            "id": um.id, "stall_id": stall_id, "day_date": um.day_date,
+            "role": um.role, "content": um.content, "message_type": um.message_type
+        },
+        "assistant_message": {
+            "id": bm.id, "stall_id": stall_id, "day_date": bm.day_date,
+            "role": bm.role, "content": bm.content, "message_type": bm.message_type
+        }
     }
 
 # ─────────────────────────────────────────────────────────────────────────────

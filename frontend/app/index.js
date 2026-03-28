@@ -278,7 +278,6 @@ function ChatBubble({ msg }) {
               </View>
               <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>Ledger Entry</Text>
             </View>
-            <ConfPill conf={r.confidence} />
           </View>
 
           {r.raw_text && (
@@ -315,11 +314,6 @@ function ChatBubble({ msg }) {
             </View>
           )}
 
-          {r.insight && (
-            <View style={{ backgroundColor: ACCENT + '12', padding: 12, borderBottomWidth: r.audio_url ? 1 : 0, borderColor: ACCENT + '30' }}>
-              <Text style={{ color: C.teal, fontSize: 12, lineHeight: 18 }}>💡 {r.insight}</Text>
-            </View>
-          )}
 
           {r.audio_url && (
             <Pressable onPress={() => playAudio(r.audio_url)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 13, backgroundColor: playingUrl === r.audio_url ? ACCENT + '14' : 'transparent' }}>
@@ -410,7 +404,7 @@ function AskScreen({ toggleSidebar }) {
     if (!activeStall || !token) return;
     axios.get(`${API_BASE}/chat/${currentDay}?stall_id=${activeStall.id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => { setMessages(r.data || []); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 200); })
-      .catch(() => {});
+      .catch(() => { });
   }, [currentDay, activeStall]);
 
   const pushMsg = (role, content, type = 'text', extra = {}) => {
@@ -426,12 +420,17 @@ function AskScreen({ toggleSidebar }) {
     setLoading(true); setStatusMsg('Thinking…');
     try {
       const res = await axios.post(`${API_BASE}/ask`, { stall_id: activeStall.id, text: text.trim(), session_context: newCtx.slice(-6) }, { headers: { Authorization: `Bearer ${token}` } });
-      const { reply, follow_up, action_taken, intent } = res.data;
-      const botType = follow_up ? 'follow_up' : (action_taken ? 'action_card' : 'text');
-      pushMsg('assistant', reply, botType);
-      if (follow_up) pushMsg('assistant', follow_up, 'follow_up');
-      if (action_taken) pushMsg('assistant', `✅ ${action_taken.type === 'udhari_added' ? `Added ₹${action_taken.amount} udhari for ${action_taken.person}` : `Marked paid for ${action_taken.person}`}`, 'action_card');
-      setSessionCtx([...newCtx, { role: 'assistant', content: reply }]);
+      const { reply, follow_up, action_taken, show_preview, result } = res.data;
+      if (show_preview && result) {
+        setPendingEntry({ result, audio_url: null, day_date: currentDay, stall_id: activeStall.id });
+        setShowConfirm(true);
+      } else {
+        const botType = follow_up ? 'follow_up' : (action_taken ? 'action_card' : 'text');
+        pushMsg('assistant', reply, botType);
+        if (follow_up) pushMsg('assistant', follow_up, 'follow_up');
+        if (action_taken) pushMsg('assistant', `✅ ${action_taken}`, 'action_card');
+        setSessionCtx([...newCtx, { role: 'assistant', content: reply }]);
+      }
     } catch { pushMsg('assistant', 'Sorry, something went wrong. Try again.'); }
     finally { setLoading(false); setStatusMsg('Tap mic to speak'); }
   };
@@ -496,30 +495,40 @@ function AskScreen({ toggleSidebar }) {
       } catch { setStatusMsg('Microphone error'); }
     } else {
       setIsRecording(false); setStatusMsg('Processing…');
-      try { await recordingRef.current.stopAndUnloadAsync(); } catch {}
+      try { await recordingRef.current.stopAndUnloadAsync(); } catch { }
       const uri = recordingRef.current?.getURI();
       recordingRef.current = null;
       if (!uri) { setStatusMsg('Tap mic to speak'); return; }
       setLoading(true);
       const fd = new FormData();
       fd.append('audio', { uri, name: 'audio.m4a', type: 'audio/m4a' });
+      fd.append('stall_id', activeStall.id);
+      fd.append('session_context', JSON.stringify(messages.slice(-6)));
+
       try {
-        // Use preview endpoint to get result WITHOUT saving
-        const res = await axios.post(`${API_BASE}/process-audio-preview?day_date=${currentDay}&stall_id=${activeStall.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }, timeout: 60000 });
-        const { result, audio_url, day_date, stall_id } = res.data;
-        // Check if query (no confirmation needed) or action
-        if (result.intent === 'query') {
-          // For query, save immediately via confirm endpoint to get chat messages
-          const saveRes = await axios.post(`${API_BASE}/confirm-entry`, { result, audio_url, day_date, stall_id }, { headers: { Authorization: `Bearer ${token}` } });
-          setMessages(prev => [...prev, saveRes.data.user_message, saveRes.data.assistant_message]);
-          setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
-        } else {
-          // Show confirmation popup
-          setPendingEntry({ result, audio_url, day_date, stall_id });
+        // REROUTE: Call /ask instead of /process-audio-preview for the Ask Tab
+        const res = await axios.post(`${API_BASE}/ask`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` },
+          timeout: 60000
+        });
+
+        const { assistant_message, user_message, show_preview, result, reply } = res.data;
+
+        if (show_preview && result) {
+          setPendingEntry({ result, audio_url: null, day_date: currentDay, stall_id: activeStall.id });
           setShowConfirm(true);
+        } else if (user_message && assistant_message) {
+          setMessages(prev => [...prev, user_message, assistant_message]);
+          setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
+        } else if (reply) {
+          pushMsg('assistant', reply);
         }
+
         setStatusMsg('Tap mic to speak');
-      } catch (e) { setStatusMsg('Server error — try again'); }
+      } catch (e) {
+        console.error("Ask Recording Error:", e);
+        setStatusMsg('Server error — try again');
+      }
       finally { setLoading(false); }
     }
   };
@@ -531,179 +540,148 @@ function AskScreen({ toggleSidebar }) {
 
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title="Ask" toggleSidebar={toggleSidebar} />
-      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 16, paddingBottom: 20, flexGrow: 1 }} showsVerticalScrollIndicator={false}>
-        {messages.length === 0 ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, paddingTop: 60 }}>
-            <View style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: ACCENT + '18', borderWidth: 1.5, borderColor: ACCENT + '35', alignItems: 'center', justifyContent: 'center', marginBottom: 22 }}>
-              <Text style={{ fontSize: 32 }}>🎙</Text>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }} keyboardVerticalOffset={0}>
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <ScreenHeader title="Ask" toggleSidebar={toggleSidebar} />
+        <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 16, paddingBottom: 20, flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+          {messages.length === 0 ? (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, paddingTop: 60 }}>
+              <View style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: ACCENT + '18', borderWidth: 1.5, borderColor: ACCENT + '35', alignItems: 'center', justifyContent: 'center', marginBottom: 22 }}>
+                <Text style={{ fontSize: 32 }}>🎙</Text>
+              </View>
+              <Text style={{ color: C.text, fontSize: 21, fontWeight: '800', textAlign: 'center', marginBottom: 10, letterSpacing: -0.3 }}>Your Business Brain</Text>
+              <Text style={{ color: C.textSub, fontSize: 14, textAlign: 'center', lineHeight: 22 }}>Speak or type to log sales, track udhari, ask questions — in Hindi, Marathi, or English.</Text>
+              <View style={{ marginTop: 28, gap: 10, width: '100%' }}>
+                {['30 vadapav becha aaj', 'Ramu ne 200 liye udhar', 'Aaj ka profit kya tha?'].map(hint => (
+                  <Pressable key={hint} onPress={() => sendToAsk(hint)} style={{ backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingVertical: 11, paddingHorizontal: 16 }}>
+                    <Text style={{ color: C.textSub, fontSize: 13 }}>"{hint}"</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
-            <Text style={{ color: C.text, fontSize: 21, fontWeight: '800', textAlign: 'center', marginBottom: 10, letterSpacing: -0.3 }}>Your Business Brain</Text>
-            <Text style={{ color: C.textSub, fontSize: 14, textAlign: 'center', lineHeight: 22 }}>Speak or type to log sales, track udhari, ask questions — in Hindi, Marathi, or English.</Text>
-            <View style={{ marginTop: 28, gap: 10, width: '100%' }}>
-              {['30 vadapav becha aaj', 'Ramu ne 200 liye udhar', 'Aaj ka profit kya tha?'].map(hint => (
-                <Pressable key={hint} onPress={() => sendToAsk(hint)} style={{ backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingVertical: 11, paddingHorizontal: 16 }}>
-                  <Text style={{ color: C.textSub, fontSize: 13 }}>"{hint}"</Text>
-                </Pressable>
-              ))}
-            </View>
+          ) : messages.map((m, i) => <ChatBubble key={m.id || i} msg={m} />)}
+        </ScrollView>
+        <View style={{ paddingHorizontal: 14, paddingBottom: 28, paddingTop: 10, backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 32, borderWidth: 1, borderColor: C.border, paddingLeft: 18, paddingRight: 6, minHeight: 54 }}>
+            <TextInput
+              style={{ flex: 1, color: C.text, fontSize: 15, paddingVertical: 8 }}
+              placeholder="Type or speak…"
+              placeholderTextColor={C.textFaint}
+              value={inputText}
+              onChangeText={setInputText}
+              editable={!loading}
+              onSubmitEditing={sendTextOrTransaction}
+              returnKeyType="send"
+            />
+            {inputText.length > 0 && (
+              <Pressable onPress={sendTextOrTransaction} disabled={loading} style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', marginRight: 6 }}>
+                <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>↑</Text>
+              </Pressable>
+            )}
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <Pressable onPress={toggleRecording} disabled={loading} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isRecording ? C.roseBg : ACCENT + '20', borderWidth: 1.5, borderColor: isRecording ? C.rose : ACCENT + '50', alignItems: 'center', justifyContent: 'center' }}>
+                {loading ? <ActivityIndicator size="small" color={ACCENT} /> : <Text style={{ fontSize: 20 }}>{isRecording ? '⏹' : '🎙'}</Text>}
+              </Pressable>
+            </Animated.View>
           </View>
-        ) : messages.map((m, i) => <ChatBubble key={m.id || i} msg={m} />)}
-      </ScrollView>
-      <View style={{ paddingHorizontal: 14, paddingBottom: 28, paddingTop: 10, backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 32, borderWidth: 1, borderColor: C.border, paddingLeft: 18, paddingRight: 6, minHeight: 54 }}>
-          <TextInput
-            style={{ flex: 1, color: C.text, fontSize: 15, paddingVertical: 8 }}
-            placeholder="Type or speak…"
-            placeholderTextColor={C.textFaint}
-            value={inputText}
-            onChangeText={setInputText}
-            editable={!loading}
-            onSubmitEditing={sendTextOrTransaction}
-            returnKeyType="send"
-          />
-          {inputText.length > 0 && (
-            <Pressable onPress={sendTextOrTransaction} disabled={loading} style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center', marginRight: 6 }}>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>↑</Text>
-            </Pressable>
-          )}
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <Pressable onPress={toggleRecording} disabled={loading} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isRecording ? C.roseBg : ACCENT + '20', borderWidth: 1.5, borderColor: isRecording ? C.rose : ACCENT + '50', alignItems: 'center', justifyContent: 'center' }}>
-              {loading ? <ActivityIndicator size="small" color={ACCENT} /> : <Text style={{ fontSize: 20 }}>{isRecording ? '⏹' : '🎙'}</Text>}
-            </Pressable>
-          </Animated.View>
+          <Text style={{ color: isRecording ? C.rose : C.textFaint, fontSize: 11, textAlign: 'center', marginTop: 8, fontWeight: '500' }}>{statusMsg}</Text>
         </View>
-        <Text style={{ color: isRecording ? C.rose : C.textFaint, fontSize: 11, textAlign: 'center', marginTop: 8, fontWeight: '500' }}>{statusMsg}</Text>
       </View>
 
-      {/* ── CONFIRMATION MODAL ── */}
-      <Modal visible={showConfirm} transparent animationType="fade">
+      <Modal visible={showConfirm} transparent animationType="slide">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'center', padding: 16 }}>
-            <View style={{ backgroundColor: C.surface, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: C.border, maxHeight: '90%' }}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' }}>
+            <View style={{ backgroundColor: C.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, borderWidth: 1, borderColor: C.border, maxHeight: '88%' }}>
               <ScrollView showsVerticalScrollIndicator={false}>
-              {pendingEntry && (() => {
-              const r = pendingEntry.result;
-              const isUdhari = r.intent === 'udhari';
-              const isQuery = r.intent === 'query';
-              const isItemMissing = isQuery && (r.query_text || '').toLowerCase().includes('not present');
-              const entries = r.data?.entries || [];
-              const udhariData = r.data || {};
-              return (
-                <>
-                  <Text style={{ color: C.text, fontSize: 20, fontWeight: '900', marginBottom: 4 }}>
-                    {isItemMissing ? '⚠️ Item Not Found' : isUdhari ? '🤝 Confirm Udhari' : '📋 Confirm Entry'}
-                  </Text>
-                  <Text style={{ color: C.textSub, fontSize: 13, marginBottom: 20 }}>
-                    {isItemMissing ? 'This item is not in your menu.' : 'Review the extracted details before saving.'}
-                  </Text>
-
-                  {isItemMissing ? (
-                    <View style={{ backgroundColor: C.amberBg, padding: 16, borderRadius: 14, borderWidth: 1, borderColor: C.amberBorder, marginBottom: 20 }}>
-                      <Text style={{ color: C.amber, fontSize: 14, lineHeight: 20 }}>{r.query_text}</Text>
-                      <Text style={{ color: C.textSub, fontSize: 12, marginTop: 8 }}>Go to Shops tab → select your stall → Add Item to add it to your menu.</Text>
-                    </View>
-                  ) : isUdhari ? (
-                    <View style={{ backgroundColor: C.indigoBg, padding: 16, borderRadius: 14, borderWidth: 1, borderColor: C.indigoBorder, marginBottom: 20 }}>
-                      {isEditingPopup && editData ? (
-                        <View style={{ gap: 12 }}>
-                          <View>
-                            <Text style={{ color: C.indigo, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>PERSON NAME</Text>
-                            <TextInput 
-                              style={{ color: '#000', backgroundColor: '#fff', fontSize: 16, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.indigo }} 
-                              value={editData.person_name} 
-                              onChangeText={t => setEditData({...editData, person_name: t})} 
-                            />
-                          </View>
-                          <View>
-                            <Text style={{ color: C.indigo, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>ITEM(S)</Text>
-                            <TextInput 
-                              style={{ color: '#000', backgroundColor: '#fff', fontSize: 14, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.indigo }} 
-                              value={editData.item} 
-                              onChangeText={t => setEditData({...editData, item: t})} 
-                            />
-                          </View>
-                          <View>
-                            <Text style={{ color: C.indigo, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>AMOUNT (₹)</Text>
-                            <TextInput 
-                              style={{ color: '#000', backgroundColor: '#fff', fontSize: 14, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.indigo }} 
-                              value={String(editData.amount || '')} 
-                              keyboardType="numeric" 
-                              onChangeText={t => setEditData({...editData, amount: Number(t) || 0})} 
-                            />
-                          </View>
+                {pendingEntry && (() => {
+                  const r = pendingEntry.result;
+                  const isUdhari = r.intent === 'udhari';
+                  const entries = r.data?.entries || [];
+                  const totalRev = entries.filter(e => e.entry_type === 'REVENUE').reduce((s, e) => s + (e.value || 0), 0);
+                  const totalExp = entries.filter(e => e.entry_type !== 'REVENUE').reduce((s, e) => s + (e.value || 0), 0);
+                  const uData = r.data || {};
+                  return (
+                    <View>
+                      {/* Header */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: isUdhari ? C.indigoBg : C.tealBg, alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 22 }}>{isUdhari ? '🤝' : '💰'}</Text>
                         </View>
-                      ) : (
-                        <>
-                          <Text style={{ color: C.indigo, fontSize: 16, fontWeight: '800', marginBottom: 8 }}>👤 {editData?.person_name}</Text>
-                          <Text style={{ color: C.text, fontSize: 14, marginBottom: 4 }}>📦 Item: {editData?.item || 'N/A'}</Text>
-                          <Text style={{ color: C.text, fontSize: 14, marginBottom: 4 }}>💰 Amount: ₹{editData?.amount}</Text>
-                          <Text style={{ color: C.textSub, fontSize: 12 }}>Direction: {editData?.direction === 'given' ? 'You gave (they owe you)' : 'You took (you owe them)'}</Text>
-                        </>
-                      )}
-                    </View>
-                  ) : (
-                      <View style={{ backgroundColor: C.surfaceUp, padding: 16, borderRadius: 14, borderWidth: 1, borderColor: C.border, marginBottom: 20 }}>
-                      {(editData?.entries || []).map((e, i) => (
-                        <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                          {isEditingPopup ? (
-                            <View style={{ flexDirection: 'row', gap: 8, flex: 1, backgroundColor: '#fff', padding: 8, borderRadius: 10 }}>
-                              <TextInput 
-                                style={{ flex: 1, color: '#000', fontSize: 15, paddingVertical: 4, paddingHorizontal: 4 }} 
-                                value={e.item_name} 
-                                onChangeText={t => { const n = JSON.parse(JSON.stringify(editData)); n.entries[i].item_name = t; setEditData(n); }} 
-                              />
-                              <TextInput 
-                                style={{ width: 70, color: '#000', fontWeight: 'bold', textAlign: 'right', borderLeftWidth: 1, borderColor: '#eee', paddingHorizontal: 4 }} 
-                                value={String(e.value || '')} 
-                                keyboardType="numeric" 
-                                onChangeText={t => { const n = JSON.parse(JSON.stringify(editData)); n.entries[i].value = Number(t) || 0; setEditData(n); }} 
-                              />
-                            </View>
-                          ) : (
-                            <>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: e.entry_type === 'REVENUE' ? C.teal : C.rose }} />
-                                <Text style={{ color: C.text, fontSize: 14 }}>{e.item_name}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: C.text, fontSize: 18, fontWeight: '900' }}>{isUdhari ? 'Udhari Entry' : 'Ledger Entry'}</Text>
+                          <Text style={{ color: C.textSub, fontSize: 12, marginTop: 2 }}>Review before saving</Text>
+                        </View>
+                      </View>
+
+                      {/* Transcript */}
+                      {r.raw_text ? (
+                        <View style={{ backgroundColor: C.surfaceUp, borderRadius: 12, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: C.border }}>
+                          <Text style={{ color: C.textFaint, fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginBottom: 4 }}>WHAT YOU SAID</Text>
+                          <Text style={{ color: C.textSub, fontSize: 13, fontStyle: 'italic' }}>"{r.raw_text}"</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Play Audio */}
+                      {pendingEntry.audio_url ? (
+                        <Pressable onPress={() => playAudio(pendingEntry.audio_url)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: ACCENT + '15', borderRadius: 12, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: ACCENT + '30' }}>
+                          <Text style={{ fontSize: 18 }}>▶</Text>
+                          <Text style={{ color: ACCENT, fontWeight: '700', fontSize: 14 }}>Play Voice Recording</Text>
+                        </Pressable>
+                      ) : null}
+
+                      {/* Items for transaction */}
+                      {!isUdhari && entries.length > 0 ? (
+                        <View style={{ backgroundColor: C.surfaceUp, borderRadius: 14, borderWidth: 1, borderColor: C.border, overflow: 'hidden', marginBottom: 14 }}>
+                          {entries.map((e, i) => {
+                            const isRev = e.entry_type === 'REVENUE';
+                            return (
+                              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: i < entries.length - 1 ? 1 : 0, borderColor: C.border }}>
+                                <View style={{ paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, backgroundColor: isRev ? C.tealBg : C.roseBg, borderWidth: 1, borderColor: isRev ? C.tealBorder : C.roseBorder, marginRight: 10 }}>
+                                  <Text style={{ color: isRev ? C.teal : C.rose, fontSize: 9, fontWeight: '800' }}>{isRev ? 'REV' : 'EXP'}</Text>
+                                </View>
+                                <Text style={{ flex: 1, color: C.text, fontSize: 14 }}>{e.item_name || e.item || '—'}</Text>
+                                <Text style={{ color: isRev ? C.teal : C.rose, fontSize: 15, fontWeight: '800', fontFamily: FONT_MONO }}>₹{e.value || 0}</Text>
                               </View>
-                              <Text style={{ color: e.entry_type === 'REVENUE' ? C.teal : C.rose, fontWeight: '700' }}>₹{e.value}</Text>
-                            </>
+                            );
+                          })}
+                          {(totalRev > 0 || totalExp > 0) && (
+                            <View style={{ flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 10, gap: 12, backgroundColor: C.surface }}>
+                              {totalRev > 0 && <Text style={{ color: C.teal, fontSize: 12, fontWeight: '700' }}>+₹{totalRev}</Text>}
+                              {totalExp > 0 && <Text style={{ color: C.rose, fontSize: 12, fontWeight: '700' }}>−₹{totalExp}</Text>}
+                              <Text style={{ color: C.textSub, fontSize: 12, fontWeight: '700', marginLeft: 'auto' }}>Net ₹{totalRev - totalExp}</Text>
+                            </View>
                           )}
                         </View>
-                      ))}
-                      {pendingEntry.audio_url && (
-                        <Pressable onPress={() => playAudio(pendingEntry.audio_url)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 10, backgroundColor: C.tealBg, borderRadius: 10 }}>
-                          <Text>▶</Text><Text style={{ color: C.teal, fontWeight: '600' }}>Play Recording</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  )}
+                      ) : null}
 
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <Pressable onPress={cancelPending} style={{ flex: 1, padding: 16, borderRadius: 14, backgroundColor: C.surfaceUp, alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
-                      <Text style={{ color: C.textSub, fontWeight: '700' }}>Cancel</Text>
-                    </Pressable>
-                    {!isItemMissing && (
-                      <Pressable onPress={() => setIsEditingPopup(!isEditingPopup)} style={{ flex: 1, padding: 16, borderRadius: 14, backgroundColor: isEditingPopup ? C.surfaceUp : C.amberBg, alignItems: 'center', borderWidth: 1, borderColor: isEditingPopup ? C.border : C.amberBorder }}>
-                        <Text style={{ color: isEditingPopup ? C.textSub : C.amber, fontWeight: '700' }}>{isEditingPopup ? 'Preview' : '✏️ Edit'}</Text>
-                      </Pressable>
-                    )}
-                    {!isItemMissing && (
-                      <Pressable onPress={handleConfirm} style={{ flex: 1.5, padding: 16, borderRadius: 14, backgroundColor: ACCENT, alignItems: 'center' }}>
-                        <Text style={{ color: '#fff', fontWeight: '800' }}>✓ Confirm</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </>
-              );
-            })()}
+                      {/* Udhari details */}
+                      {isUdhari ? (
+                        <View style={{ backgroundColor: C.indigoBg, borderRadius: 14, borderWidth: 1, borderColor: C.indigoBorder, padding: 16, marginBottom: 14 }}>
+                          <Text style={{ color: C.indigo, fontSize: 13, fontWeight: '700', marginBottom: 8 }}>Credit Details</Text>
+                          <Text style={{ color: C.text, fontSize: 15, fontWeight: '800', marginBottom: 4 }}>👤 {uData.person_name || '—'}</Text>
+                          <Text style={{ color: C.textSub, fontSize: 13 }}>Item: {uData.item || 'Not specified'}</Text>
+                          <Text style={{ color: C.indigo, fontSize: 18, fontWeight: '900', fontFamily: FONT_MONO, marginTop: 8 }}>₹{uData.amount || 0}</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Action buttons */}
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                        <Pressable onPress={cancelPending} style={{ flex: 1, paddingVertical: 15, borderRadius: 14, backgroundColor: C.surfaceUp, alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
+                          <Text style={{ color: C.textSub, fontWeight: '700', fontSize: 15 }}>✕ Cancel</Text>
+                        </Pressable>
+                        <Pressable onPress={handleConfirm} style={{ flex: 2, paddingVertical: 15, borderRadius: 14, backgroundColor: ACCENT, alignItems: 'center' }}>
+                          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>✓ Confirm</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })()}
               </ScrollView>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -713,6 +691,7 @@ function DashboardScreen({ toggleSidebar }) {
   const { C } = useTheme();
   const { currentDay, activeStall } = useContext(AppContext);
   const [summaries, setSummaries] = useState([]);
+  const [insights, setInsights] = useState({ anomalies: [], demand_highlights: [], suggestions: [] });
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('today'); // 'today' | 'monthly'
   const [expandedDay, setExpandedDay] = useState(null);
@@ -721,8 +700,11 @@ function DashboardScreen({ toggleSidebar }) {
     if (!activeStall || !token) return;
     setLoading(true);
     axios.get(`${API_BASE}/analytics/daily-summary?stall_id=${activeStall.id}&days=30`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => setSummaries(r.data || []))
-      .catch(() => {})
+      .then(r => {
+        setSummaries(r.data.days || []);
+        setInsights(r.data.engine_insights || { anomalies: [], demand_highlights: [], suggestions: [] });
+      })
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [currentDay, activeStall, token]);
 
@@ -737,12 +719,12 @@ function DashboardScreen({ toggleSidebar }) {
 
   const activeData = tab === 'today' ? todayData : monthlyData;
   const net = activeData.profit || 0;
-  
+
   // Pure JS Trend Analysis
   const detectTrend = () => {
     if (summaries.length < 3) return { type: 'stable', text: 'Need more days of data to spot trends.' };
-    const recent = summaries.slice(0,3).reduce((s, d) => s + (d.total_revenue || 0), 0) / 3;
-    const past = summaries.slice(3,6).reduce((s, d) => s + (d.total_revenue || 0), 0) / 3;
+    const recent = summaries.slice(0, 3).reduce((s, d) => s + (d.total_revenue || 0), 0) / 3;
+    const past = summaries.slice(3, 6).reduce((s, d) => s + (d.total_revenue || 0), 0) / 3;
     if (past === 0) return { type: 'rising', text: 'Sales are starting to grow this week.' };
     const pct = (recent - past) / past;
     if (pct > 0.1) return { type: 'rising', text: '📈 Your sales are growing — last 3 days were stronger than before.' };
@@ -751,40 +733,60 @@ function DashboardScreen({ toggleSidebar }) {
   };
 
   const trend = detectTrend();
-  
+
   // Weekly Patterns
   const getWeeklyPattern = () => {
     if (summaries.length < 5) return "Keep recording to unlock weekly patterns.";
     const valid = summaries.filter(s => s.total_revenue > 0);
     if (valid.length === 0) return "Not enough active days to find a pattern.";
-    const bestDay = valid.sort((a,b) => b.total_revenue - a.total_revenue)[0];
+    const bestDay = valid.sort((a, b) => b.total_revenue - a.total_revenue)[0];
     const dateObj = new Date(bestDay.date);
     const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
     return `Your best sales recently happen on ${dayName}s (₹${bestDay.total_revenue}).`;
   };
 
   // Stockout Alerts
-  const recentStockouts = Array.from(new Set(summaries.slice(0,4).flatMap(s => s.stockout_items || [])));
+  const recentStockouts = Array.from(new Set(summaries.slice(0, 4).flatMap(s => s.stockout_items || [])));
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScreenHeader title="Dashboard" toggleSidebar={toggleSidebar} />
-      
+
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={ACCENT} size="large" /></View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }}>
-          
+
           <View style={{ flexDirection: 'row', backgroundColor: C.surfaceUp, borderRadius: 12, padding: 4, borderWidth: 1, borderColor: C.border }}>
             <Pressable onPress={() => setTab('today')} style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: tab === 'today' ? C.surface : 'transparent', alignItems: 'center', elevation: tab === 'today' ? 2 : 0 }}><Text style={{ color: tab === 'today' ? C.text : C.textSub, fontWeight: '700' }}>Today</Text></Pressable>
             <Pressable onPress={() => setTab('monthly')} style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: tab === 'monthly' ? C.surface : 'transparent', alignItems: 'center', elevation: tab === 'monthly' ? 2 : 0 }}><Text style={{ color: tab === 'monthly' ? C.text : C.textSub, fontWeight: '700' }}>Monthly (30 Days)</Text></Pressable>
           </View>
 
           {/* KPI SECTION */}
+          {insights.anomalies?.length > 0 && (
+            <View style={{ gap: 8 }}>
+              {insights.anomalies.length > 2 ? (
+                <View style={{ backgroundColor: C.roseBg, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: C.roseBorder, flexDirection: 'row', gap: 10 }}>
+                  <Text>🛡️</Text>
+                  <Text style={{ flex: 1, color: C.rose, fontSize: 13, fontWeight: '700' }}>
+                    {insights.anomalies.length} unusual activity patterns detected this month. Check your daily breakdown for details.
+                  </Text>
+                </View>
+              ) : (
+                insights.anomalies.map((anno, idx) => (
+                  <View key={idx} style={{ backgroundColor: C.roseBg, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: C.roseBorder, flexDirection: 'row', gap: 10 }}>
+                    <Text>🛡️</Text>
+                    <Text style={{ flex: 1, color: C.rose, fontSize: 13, fontWeight: '700' }}>{anno}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+
           {activeData.stockout_items?.length > 0 && (
             <View style={{ backgroundColor: C.amberBg, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: C.amberBorder, flexDirection: 'row', gap: 10 }}>
               <Text>⚠️</Text>
-              <Text style={{ flex: 1, color: C.amber, fontSize: 13, fontWeight: '600' }}>You ran out of {activeData.stockout_items.join(', ')} {tab ==='today'?'today':'this month'}.</Text>
+              <Text style={{ flex: 1, color: C.amber, fontSize: 13, fontWeight: '600' }}>You ran out of {activeData.stockout_items.join(', ')} {tab === 'today' ? 'today' : 'this month'}.</Text>
             </View>
           )}
 
@@ -803,13 +805,31 @@ function DashboardScreen({ toggleSidebar }) {
 
           <View style={{ backgroundColor: net >= 0 ? C.tealBg : C.roseBg, borderRadius: 20, padding: 22, borderWidth: 1, borderColor: net >= 0 ? C.tealBorder : C.roseBorder, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View>
-              <Text style={{ color: C.textSub, fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Net Profit</Text>
+              <Text style={{ color: C.textSub, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' }}>Net Profit</Text>
               <Text style={{ color: net >= 0 ? C.teal : C.rose, fontSize: 32, fontWeight: '900', fontFamily: FONT_MONO }}>{net >= 0 ? '+' : ''}₹{Math.round(net)}</Text>
             </View>
             <Text style={{ fontSize: 42 }}>{net >= 0 ? '🤑' : '😬'}</Text>
           </View>
 
-          {/* COMBINED TRENDS & INTEL SECTION ALWAYS VISIBLE */}
+          {/* FINANCING & GROWTH SECTION MOVED TO TOP */}
+          <View style={{ gap: 16 }}>
+            <View style={{ backgroundColor: C.indigoBg, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.indigoBorder }}>
+              <Text style={{ color: C.indigo, fontSize: 11, fontWeight: '800', marginBottom: 12 }}>🇮🇳 GOVT SCHEMES & SUPPORT</Text>
+              {insights.recommended_scheme && (
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 14, padding: 16, borderLeftWidth: 4, borderColor: C.teal }}>
+                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>{insights.recommended_scheme.name}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 4 }}>{insights.recommended_scheme.reason}</Text>
+                </View>
+              )}
+            </View>
+            <View style={{ backgroundColor: C.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border }}>
+              <Text style={{ color: C.textSub, fontSize: 11, fontWeight: '800', marginBottom: 12 }}>🚀 LOAN ESTIMATOR</Text>
+              <Text style={{ color: C.text, fontSize: 24, fontWeight: '900' }}>₹{Math.round(monthlyData.profit * 3.5)}</Text>
+              <Text style={{ color: C.teal, fontSize: 12, fontWeight: '600' }}>Estimated Credit Limit</Text>
+            </View>
+          </View>
+
+          {/* DAILY BREAKDOWN */}
           <View style={{ gap: 16 }}>
             {/* Short Term */}
             <View style={{ backgroundColor: C.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border }}>
@@ -823,92 +843,67 @@ function DashboardScreen({ toggleSidebar }) {
               <Text style={{ color: C.text, fontSize: 15, lineHeight: 22 }}>{getWeeklyPattern()}</Text>
             </View>
 
-            {/* Tomorrow Suggestions */}
+            {/* Demand & Growth Insights */}
+            {insights.demand_highlights?.length > 0 && (
+              <View style={{ backgroundColor: C.tealBg, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.tealBorder }}>
+                <Text style={{ color: C.teal, fontSize: 12, fontWeight: '800', letterSpacing: 1, marginBottom: 12 }}>🚀 DEMAND & GROWTH INSIGHTS</Text>
+                {insights.demand_highlights.map((h, i) => (
+                  <View key={i} style={{ marginBottom: 12 }}>
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{h.item}</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 4 }}>
+                      Sold ₹{Math.round(h.observed)} but early stockout detected. Estimated true demand: <Text style={{ color: '#fff', fontWeight: '900' }}>₹{Math.round(h.estimated)}</Text>.
+                    </Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, fontStyle: 'italic', marginTop: 2 }}>{h.reason}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Combined Growth Suggestions */}
             <View style={{ backgroundColor: C.indigoBg, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.indigoBorder }}>
-              <Text style={{ color: C.indigo, fontSize: 12, fontWeight: '800', letterSpacing: 1, marginBottom: 10 }}>💡 TOMORROW'S SUGGESTIONS</Text>
-              {recentStockouts.map(item => (
-                <Text key={item} style={{ color: '#fff', fontSize: 14, marginBottom: 6 }}>• Prepare extra {item} tomorrow (~20% more) to avoid running out again.</Text>
+              <Text style={{ color: C.indigo, fontSize: 12, fontWeight: '800', letterSpacing: 1, marginBottom: 12 }}>💡 GROWTH STRATEGY (TOMORROW)</Text>
+              {insights.suggestions?.map((sug, i) => (
+                <View key={i} style={{ marginBottom: 10, backgroundColor: 'rgba(255,255,255,0.08)', padding: 12, borderRadius: 12 }}>
+                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>{sug.suggestion}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4 }}>Reason: {sug.reason}</Text>
+                </View>
               ))}
-              {recentStockouts.length === 0 && (
+              {(!insights.suggestions || insights.suggestions.length === 0) && (
                 <Text style={{ color: '#fff', fontSize: 14 }}>• Trend is stable. Keep stock levels similar to today.</Text>
               )}
             </View>
-
-            {/* Day Breakdown */}
-            <Text style={{ color: C.textSub, fontSize: 12, fontWeight: '800', letterSpacing: 1, marginTop: 12 }}>📆 DAILY BREAKDOWN</Text>
-            {summaries.map((s, i) => (
-              <View key={i} style={{ backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' }}>
-                <Pressable onPress={() => setExpandedDay(expandedDay === i ? null : i)} style={{ padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ color: C.text, fontWeight: '700' }}>{s.date === currentDay ? 'Today' : s.date}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <Text style={{ color: s.profit >= 0 ? C.teal : C.rose, fontWeight: '700', fontFamily: FONT_MONO }}>{s.profit >= 0 ? '+' : ''}₹{Math.round(s.profit)}</Text>
-                    <Text style={{ color: C.textSub, fontSize: 10 }}>{expandedDay === i ? '▲' : '▼'}</Text>
-                  </View>
-                </Pressable>
-                {expandedDay === i && (
-                  <View style={{ paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4, backgroundColor: C.surfaceUp, borderTopWidth: 1, borderColor: C.border }}>
-                    {Object.keys(s.items || {}).map(itemName => {
-                      const it = s.items[itemName];
-                      return (
-                        <View key={itemName} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Text style={{ color: C.text, fontSize: 13 }}>{itemName}</Text>
-                            {it.stockout && <Text style={{ fontSize: 10 }}>⚠️ zero stock</Text>}
-                          </View>
-                          <Text style={{ color: C.teal, fontSize: 13, fontFamily: FONT_MONO }}>₹{Math.round(it.revenue)}</Text>
-                        </View>
-                      );
-                    })}
-                    {Object.keys(s.items || {}).length === 0 && <Text style={{ color: C.textFaint, fontSize: 12, marginTop: 6 }}>No items recorded.</Text>}
-                  </View>
-                )}
-              </View>
-            ))}
-
-            {/* FINANCING & GROWTH SECTION */}
-            {summaries.length >= 1 && (
-              <View style={{ marginTop: 20, gap: 16 }}>
-                <Text style={{ color: C.textSub, fontSize: 12, fontWeight: '800', letterSpacing: 1 }}>🤝 FINANCING & GROWTH</Text>
-                
-                {/* Loan Estimator */}
-                <View style={{ backgroundColor: C.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border }}>
-                  <Text style={{ color: C.textSub, fontSize: 11, fontWeight: '800', marginBottom: 12 }}>🚀 SMALL BUSINESS LOAN ESTIMATOR</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View>
-                      <Text style={{ color: C.text, fontSize: 24, fontWeight: '900' }}>₹{Math.round(monthlyData.profit * 3.5)}</Text>
-                      <Text style={{ color: C.teal, fontSize: 12, fontWeight: '600' }}>Estimated Credit Limit</Text>
-                    </View>
-                    <Pressable onPress={() => Alert.alert("How is this calculated?", "We look at your average monthly surplus from VoiceTrace. Banks often lend up to 3.5x your monthly profit for short-term working capital.")} style={{ padding: 8, backgroundColor: C.surfaceUp, borderRadius: 10 }}>
-                      <Text style={{ fontSize: 18 }}>❔</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={{ color: C.textSub, fontSize: 13, marginTop: 14, lineHeight: 18 }}>
-                    Based on your monthly surplus of ₹{Math.round(monthlyData.profit)}, you could qualify for micro-loans to expand your {activeStall?.stall_type || "shop"}.
-                  </Text>
-                </View>
-
-                {/* Government Schemes */}
-                <View style={{ backgroundColor: C.indigoBg, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.indigoBorder }}>
-                  <Text style={{ color: C.indigo, fontSize: 11, fontWeight: '800', marginBottom: 12 }}>🇮🇳 GOVT SCHEMES FOR YOU</Text>
-                  
-                  <View style={{ gap: 12 }}>
-                    <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 12 }}>
-                      <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>PM SVANidhi Scheme</Text>
-                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4 }}>Micro-credit up to ₹50,000 for street vendors with low interest.</Text>
-                      <Text style={{ color: C.indigo, fontSize: 11, marginTop: 6, fontWeight: '700' }}>Apply: pmsvanidhi.mohua.gov.in</Text>
-                    </View>
-
-                    <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 12 }}>
-                      <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Pradhan Mantri Mudra Yojana</Text>
-                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4 }}>"Shishu" loan up to ₹50,000 for starting or expanding small businesses.</Text>
-                      <Text style={{ color: C.indigo, fontSize: 11, marginTop: 6, fontWeight: '700' }}>Check: mudra.org.in</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
           </View>
 
+          {/* Day Breakdown */}
+          <Text style={{ color: C.textSub, fontSize: 12, fontWeight: '800', letterSpacing: 1, marginTop: 12 }}>📆 DAILY BREAKDOWN</Text>
+          {summaries.map((s, i) => (
+            <View key={i} style={{ backgroundColor: C.surface, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' }}>
+              <Pressable onPress={() => setExpandedDay(expandedDay === i ? null : i)} style={{ padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: C.text, fontWeight: '700' }}>{s.date === currentDay ? 'Today' : s.date}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Text style={{ color: s.profit >= 0 ? C.teal : C.rose, fontWeight: '700', fontFamily: FONT_MONO }}>{s.profit >= 0 ? '+' : ''}₹{Math.round(s.profit)}</Text>
+                  <Text style={{ color: C.textSub, fontSize: 10 }}>{expandedDay === i ? '▲' : '▼'}</Text>
+                </View>
+              </Pressable>
+              {expandedDay === i && (
+                <View style={{ paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4, backgroundColor: C.surfaceUp, borderTopWidth: 1, borderColor: C.border }}>
+                  {Object.keys(s.items || {}).map(itemName => {
+                    const it = s.items[itemName];
+                    return (
+                      <View key={itemName} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ color: C.text, fontSize: 13 }}>{itemName}</Text>
+                          {it.stockout && <Text style={{ fontSize: 10 }}>⚠️ zero stock</Text>}
+                        </View>
+                        <Text style={{ color: C.teal, fontSize: 13, fontFamily: FONT_MONO }}>₹{Math.round(it.revenue)}</Text>
+                      </View>
+                    );
+                  })}
+                  {Object.keys(s.items || {}).length === 0 && <Text style={{ color: C.textFaint, fontSize: 12, marginTop: 6 }}>No items recorded.</Text>}
+                </View>
+              )}
+            </View>
+          ))}
         </ScrollView>
       )}
     </View>
@@ -930,7 +925,7 @@ function HistoryScreen({ toggleSidebar }) {
     const ep = search.trim() ? `/search?query=${encodeURIComponent(search)}&stall_id=${activeStall.id}` : `/entries?stall_id=${activeStall.id}`;
     axios.get(`${API_BASE}${ep}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setSessions(r.data || []))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [activeStall, token, search]);
 
@@ -941,7 +936,7 @@ function HistoryScreen({ toggleSidebar }) {
     return acc;
   }, {});
   const dates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
-  
+
   const handleExport = async () => {
     if (!activeStall) return;
     try {
@@ -963,7 +958,6 @@ function HistoryScreen({ toggleSidebar }) {
   const daysWithData = dates.length;
   const totalRevenueAll = sessions.reduce((sum, s) => sum + (s.total_revenue || 0), 0);
   const avgDaily = daysWithData > 0 ? (totalRevenueAll / daysWithData) : 0;
-  const showLoan = daysWithData >= 3;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -989,25 +983,6 @@ function HistoryScreen({ toggleSidebar }) {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={ACCENT} size="large" /></View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-          
-          {showLoan && !search && (
-            <View style={{ backgroundColor: '#1E293B', borderRadius: 16, padding: 18, marginBottom: 20, borderWidth: 1, borderColor: '#334155' }}>
-              <Text style={{ color: '#F1F5F9', fontSize: 15, fontWeight: '800', marginBottom: 12 }}>🏦 Small Business Loan Estimator</Text>
-              <Text style={{ color: '#94A3B8', fontSize: 13, marginBottom: 10, lineHeight: 18 }}>Based on your verifiable voice-locked transaction history, you may be eligible for credit.</Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={{ color: '#CBD5E1', fontSize: 12 }}>Avg Daily Revenue</Text>
-                <Text style={{ color: '#E2E8F0', fontSize: 12, fontWeight: '700' }}>₹{Math.round(avgDaily)}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
-                <Text style={{ color: '#CBD5E1', fontSize: 12 }}>Consistency Score</Text>
-                <Text style={{ color: '#10B981', fontSize: 12, fontWeight: '700' }}>Great</Text>
-              </View>
-              <View style={{ backgroundColor: '#0F172A', padding: 12, borderRadius: 8, alignItems: 'center' }}>
-                <Text style={{ color: '#38BDF8', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>Estimated Eligibility</Text>
-                <Text style={{ color: '#F8FAFC', fontSize: 18, fontWeight: '900', fontFamily: FONT_MONO }}>₹{Math.round(avgDaily * 15)} – ₹{Math.round(avgDaily * 40)}</Text>
-              </View>
-            </View>
-          )}
 
           {dates.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 60 }}><Text style={{ color: C.textFaint }}>No records found.</Text></View>
@@ -1032,11 +1007,12 @@ function HistoryScreen({ toggleSidebar }) {
                         <View style={{ backgroundColor: C.tealBg, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: C.tealBorder }}>
                           <Text style={{ color: C.teal, fontSize: 9, fontWeight: '800' }}>🔒 VERIFIED</Text>
                         </View>
+                        <Text style={{ fontSize: 12 }}>{sess.audio_url ? '🎤' : '⌨️'}</Text>
                         <Text style={{ color: C.textFaint, fontSize: 11, fontFamily: FONT_MONO }}>#{sess.id.toString().padStart(6, '0')}</Text>
                       </View>
-                      <Text style={{ color: C.textSub, fontSize: 11 }}>{new Date(sess.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</Text>
+                      <Text style={{ color: C.textSub, fontSize: 11 }}>{new Date(sess.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                     </View>
-                    
+
                     <View style={{ padding: 14 }}>
                       {(sess.entries || []).map((e, idx) => {
                         const isRev = e.entry_type === 'REVENUE';
@@ -1052,7 +1028,7 @@ function HistoryScreen({ toggleSidebar }) {
                         );
                       })}
                       {sess.insight && <Text style={{ color: C.textSub, fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>💬 "{sess.insight}"</Text>}
-                      
+
                       {sess.audio_url && (
                         <Pressable onPress={() => playAudio(sess.audio_url)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: playingUrl === sess.audio_url ? ACCENT + '20' : C.bgElevated, borderRadius: 8, alignSelf: 'flex-start' }}>
                           <Text style={{ fontSize: 12 }}>{playingUrl === sess.audio_url ? '⏸' : '▶'}</Text>
@@ -1086,7 +1062,7 @@ function UdhariScreen({ toggleSidebar }) {
     setLoading(true);
     axios.get(`${API_BASE}/udhari?stall_id=${activeStall.id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setPeople(r.data || []))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   };
 
@@ -1095,26 +1071,30 @@ function UdhariScreen({ toggleSidebar }) {
   const markPaid = async (entryId) => {
     Alert.alert('Mark as Paid?', 'This will mark the entry as paid and cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Mark Paid ✓', onPress: async () => {
-        setPayingId(entryId);
-        try {
-          await axios.put(`${API_BASE}/udhari/entry/${entryId}/pay`, {}, { headers: { Authorization: `Bearer ${token}` } });
-          fetchUdhari();
-        } catch { Alert.alert('Error', 'Failed to mark paid'); }
-        finally { setPayingId(null); }
-      }}
+      {
+        text: 'Mark Paid ✓', onPress: async () => {
+          setPayingId(entryId);
+          try {
+            await axios.put(`${API_BASE}/udhari/entry/${entryId}/pay`, {}, { headers: { Authorization: `Bearer ${token}` } });
+            fetchUdhari();
+          } catch { Alert.alert('Error', 'Failed to mark paid'); }
+          finally { setPayingId(null); }
+        }
+      }
     ]);
   };
 
   const markAllPaid = async (personId) => {
     Alert.alert('Mark All Paid?', 'All pending entries for this person will be marked paid.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Yes, Clear All', onPress: async () => {
-        try {
-          await axios.put(`${API_BASE}/udhari/person/${personId}/pay-all`, {}, { headers: { Authorization: `Bearer ${token}` } });
-          fetchUdhari();
-        } catch { Alert.alert('Error', 'Failed'); }
-      }}
+      {
+        text: 'Yes, Clear All', onPress: async () => {
+          try {
+            await axios.put(`${API_BASE}/udhari/person/${personId}/pay-all`, {}, { headers: { Authorization: `Bearer ${token}` } });
+            fetchUdhari();
+          } catch { Alert.alert('Error', 'Failed'); }
+        }
+      }
     ]);
   };
 
@@ -1123,7 +1103,7 @@ function UdhariScreen({ toggleSidebar }) {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScreenHeader title="Udhari (Borrow)" toggleSidebar={toggleSidebar} />
-      
+
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={ACCENT} size="large" /></View>
       ) : (
@@ -1160,7 +1140,7 @@ function UdhariScreen({ toggleSidebar }) {
                   <Text style={{ color: C.textSub, fontSize: 12 }}>{expandedPerson === p.id ? '▲' : '▼'}</Text>
                 </View>
               </Pressable>
-              
+
               {expandedPerson === p.id && (
                 <View style={{ backgroundColor: C.surfaceUp, borderTopWidth: 1, borderColor: C.border }}>
                   {p.entries.length === 0 ? <Text style={{ padding: 14, color: C.textFaint }}>No history.</Text> : p.entries.map(e => {
@@ -1215,7 +1195,7 @@ function ShopsScreen({ toggleSidebar }) {
   // Modals
   const [showStallModal, setShowStallModal] = useState(false);
   const [stallForm, setStallForm] = useState({ id: null, name: '', location: '' });
-  
+
   const [showMenuModal, setShowMenuModal] = useState(false);
   const [menuForm, setMenuForm] = useState({ stallId: null, itemId: null, name: '', price: '' });
 
@@ -1250,13 +1230,15 @@ function ShopsScreen({ toggleSidebar }) {
   const deleteStall = (id) => {
     Alert.alert('Confirm', 'Delete this shop and all its data?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await axios.delete(`${API_BASE}/stalls/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-          if (activeStall?.id === id) setActiveStall(null);
-          fetchStalls();
-        } catch { Alert.alert('Error', 'Failed to delete'); }
-      }}
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await axios.delete(`${API_BASE}/stalls/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+            if (activeStall?.id === id) setActiveStall(null);
+            fetchStalls();
+          } catch { Alert.alert('Error', 'Failed to delete'); }
+        }
+      }
     ]);
   };
 
@@ -1277,12 +1259,14 @@ function ShopsScreen({ toggleSidebar }) {
   const deleteMenu = (itemId) => {
     Alert.alert('Confirm', 'Remove this item?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        try {
-          await axios.delete(`${API_BASE}/menu/${itemId}`, { headers: { Authorization: `Bearer ${token}` } });
-          fetchStalls();
-        } catch { Alert.alert('Error', 'Failed to delete item'); }
-      }}
+      {
+        text: 'Remove', style: 'destructive', onPress: async () => {
+          try {
+            await axios.delete(`${API_BASE}/menu/${itemId}`, { headers: { Authorization: `Bearer ${token}` } });
+            fetchStalls();
+          } catch { Alert.alert('Error', 'Failed to delete item'); }
+        }
+      }
     ]);
   };
 
@@ -1346,8 +1330,8 @@ function ShopsScreen({ toggleSidebar }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' }}>
           <View style={{ backgroundColor: C.surface, borderRadius: 24, margin: 24, padding: 24, paddingBottom: 32 }}>
             <Text style={{ color: C.text, fontSize: 20, fontWeight: '800', marginBottom: 20 }}>{stallForm.id ? 'Edit Shop' : 'Add Shop'}</Text>
-            <AuthInput label="Shop Name" value={stallForm.name} onChangeText={t => setStallForm({...stallForm, name: t})} placeholder="e.g. Raju Vadapav" />
-            <AuthInput label="Location (Optional)" value={stallForm.location} onChangeText={t => setStallForm({...stallForm, location: t})} placeholder="e.g. Bandra East" />
+            <AuthInput label="Shop Name" value={stallForm.name} onChangeText={t => setStallForm({ ...stallForm, name: t })} placeholder="e.g. Raju Vadapav" />
+            <AuthInput label="Location (Optional)" value={stallForm.location} onChangeText={t => setStallForm({ ...stallForm, location: t })} placeholder="e.g. Bandra East" />
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
               <Pressable onPress={() => setShowStallModal(false)} style={{ flex: 1, padding: 16, borderRadius: 14, backgroundColor: C.bgElevated, alignItems: 'center' }}>
                 <Text style={{ color: C.textSub, fontWeight: '700' }}>Cancel</Text>
@@ -1365,8 +1349,8 @@ function ShopsScreen({ toggleSidebar }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' }}>
           <View style={{ backgroundColor: C.surface, borderRadius: 24, margin: 24, padding: 24, paddingBottom: 32 }}>
             <Text style={{ color: C.text, fontSize: 20, fontWeight: '800', marginBottom: 20 }}>{menuForm.itemId ? 'Edit Item' : 'Add Item'}</Text>
-            <AuthInput label="Item Name" value={menuForm.name} onChangeText={t => setMenuForm({...menuForm, name: t})} placeholder="e.g. Samosa" />
-            <AuthInput label="Price (₹)" value={menuForm.price} onChangeText={t => setMenuForm({...menuForm, price: t})} keyboardType="numeric" placeholder="e.g. 15" />
+            <AuthInput label="Item Name" value={menuForm.name} onChangeText={t => setMenuForm({ ...menuForm, name: t })} placeholder="e.g. Samosa" />
+            <AuthInput label="Price (₹)" value={menuForm.price} onChangeText={t => setMenuForm({ ...menuForm, price: t })} keyboardType="numeric" placeholder="e.g. 15" />
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
               <Pressable onPress={() => setShowMenuModal(false)} style={{ flex: 1, padding: 16, borderRadius: 14, backgroundColor: C.bgElevated, alignItems: 'center' }}>
                 <Text style={{ color: C.textSub, fontWeight: '700' }}>Cancel</Text>
@@ -1458,7 +1442,7 @@ function OnboardingScreen({ token, onComplete }) {
               {items.map((it, idx) => (
                 <View key={idx} style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                   <View style={{ flex: 2 }}>
-                    <AuthInput label={`Item ${idx+1}`} value={it.name} onChangeText={t => { const n = [...items]; n[idx].name = t; setItems(n); }} placeholder="e.g. Samosa" />
+                    <AuthInput label={`Item ${idx + 1}`} value={it.name} onChangeText={t => { const n = [...items]; n[idx].name = t; setItems(n); }} placeholder="e.g. Samosa" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <AuthInput label="Price (₹)" value={it.price} onChangeText={t => { const n = [...items]; n[idx].price = t; setItems(n); }} keyboardType="numeric" placeholder="15" />
@@ -1502,17 +1486,17 @@ function MainAppInner() {
     setInitLoading(true);
     axios.get(`${API_BASE}/onboarding/status`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => {
-         const isNeeded = !res.data.completed;
-         setNeedsOnboarding(isNeeded);
-         if (!isNeeded) {
-            axios.get(`${API_BASE}/stalls`, { headers: { Authorization: `Bearer ${token}` } })
-              .then(r => {
-                setStalls(r.data);
-                if (r.data.length > 0 && !activeStall) setActiveStall(r.data[0]);
-              }).catch(() => {});
-         }
+        const isNeeded = !res.data.completed;
+        setNeedsOnboarding(isNeeded);
+        if (!isNeeded) {
+          axios.get(`${API_BASE}/stalls`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => {
+              setStalls(r.data);
+              if (r.data.length > 0 && !activeStall) setActiveStall(r.data[0]);
+            }).catch(() => { });
+        }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setInitLoading(false));
   }, [token]);
 

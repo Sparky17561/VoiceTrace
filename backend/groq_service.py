@@ -106,7 +106,7 @@ def process_audio_pipeline(audio_file_path: str, context_str: str = "No entries 
         
         with open(audio_file_path, "rb") as file:
             files = { "file": ("audio.m4a", file, "audio/m4a") }
-            data = { "model": "whisper-large-v3-turbo" }
+            data = { "model": "whisper-large-v3-turbo", "language": "hi" }
             response = requests.post(url, headers=headers, files=files, data=data, timeout=45)
             
         if response.status_code != 200:
