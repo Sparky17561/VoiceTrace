@@ -88,6 +88,11 @@ class OTPVerify(BaseModel):
     phone: str
     otp: str
 
+class ResetPassword(BaseModel):
+    phone: str
+    otp: str
+    new_password: str
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTH ENDPOINTS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,8 +146,34 @@ def request_otp(req: OTPRequest, db: Session = Depends(get_db)):
     user.otp_code = otp
     user.otp_expiry = datetime.utcnow() + timedelta(minutes=5)
     db.commit()
+    
+    # Try sending via Twilio if configured
+    sid = os.getenv("TWILIO_ACCOUNT_SID")
+    token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_num = os.getenv("TWILIO_PHONE_NUMBER")
+    
+    sent_sms = False
+    if sid and token and from_num:
+        try:
+            # E.164 normalization for Twilio (Indian number default +91 if not specified)
+            target_phone = str(req.phone).strip()
+            if not target_phone.startswith('+'):
+                if len(target_phone) == 10: target_phone = "+91" + target_phone
+                else: target_phone = "+" + target_phone # Assume + prefix needed anyway
+            
+            from twilio.rest import Client
+            client = Client(sid, token)
+            client.messages.create(
+                body=f"Your VoiceTrace OTP is: {otp}. It expires in 5 minutes.",
+                from_=from_num,
+                to=target_phone
+            )
+            sent_sms = True
+        except Exception as e:
+            print(f"Twilio Error: {e}")
+
     print(f"DEBUG: OTP for {req.phone} is {otp}")
-    return {"message": "OTP sent successfully (Simulated)"}
+    return {"message": "OTP sent successfully" + (" (SMS)" if sent_sms else " (Simulation)")}
 
 @app.post("/auth/otp-verify", response_model=TokenResponse)
 def verify_otp(req: OTPVerify, db: Session = Depends(get_db)):
@@ -151,7 +182,19 @@ def verify_otp(req: OTPVerify, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid or expired OTP")
     user.otp_code = None; db.commit()
     access_token = create_access_token(data={"sub": user.phone})
-    return {"access_token": access_token, "user_id": user.id, "name": user.name or "Trader"}
+    stalls_count = db.query(models.Stall).filter(models.Stall.user_id == user.id).count()
+    return {"access_token": access_token, "user_id": user.id, "name": user.name or "Trader", "needs_onboarding": stalls_count == 0}
+
+@app.post("/auth/reset-password")
+def reset_password(req: ResetPassword, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.phone == req.phone).first()
+    if not user or user.otp_code != req.otp or (user.otp_expiry and user.otp_expiry < datetime.utcnow()):
+        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
+    
+    user.hashed_password = get_password_hash(req.new_password)
+    user.otp_code = None
+    db.commit()
+    return {"status": "success", "message": "Password reset successfully"}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STALL & MENU

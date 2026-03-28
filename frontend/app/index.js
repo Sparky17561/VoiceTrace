@@ -185,18 +185,21 @@ function AuthScreen() {
         const r = await axios.post(`${API_BASE}/auth/register`, { phone, password, name });
         login(r.data.access_token, { id: r.data.user_id, name: r.data.name, phone, needs_onboarding: true });
       } else if (mode === 'forgot') {
-        await axios.post(`${API_BASE}/auth/otp-request`, { phone });
+        const res = await axios.post(`${API_BASE}/auth/otp-request`, { phone });
         setMode('verify');
-        Alert.alert('OTP Sent', 'Check server logs for your OTP.');
+        Alert.alert('OTP Sent', res.data.message || 'Check your phone or server logs for OTP.');
       } else if (mode === 'verify') {
-        const r = await axios.post(`${API_BASE}/auth/otp-verify`, { phone, otp });
-        login(r.data.access_token, { id: r.data.user_id, name: r.data.name, phone });
+        await axios.post(`${API_BASE}/auth/reset-password`, { phone, otp, new_password: password });
+        Alert.alert('Success', 'Password reset successfully. Please sign in with your new password.');
+        setMode('login');
+        setPassword('');
+        setOtp('');
       }
     } catch (err) { Alert.alert('Error', err.response?.data?.detail || 'Authentication failed'); }
     finally { setLoading(false); }
   };
 
-  const btnLabel = { login: 'Sign in', register: 'Create account', forgot: 'Send OTP', verify: 'Verify OTP' };
+  const btnLabel = { login: 'Sign in', register: 'Create account', forgot: 'Send OTP', verify: 'Reset Password' };
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
       <StatusBar barStyle={resolved === 'dark' ? 'light-content' : 'dark-content'} />
@@ -215,8 +218,8 @@ function AuthScreen() {
         <View style={{ backgroundColor: C.surface, borderRadius: 22, padding: 22, borderWidth: 1, borderColor: C.border }}>
           {mode === 'register' && <AuthInput label="Full name" value={name} onChangeText={setName} placeholder="Your name" />}
           <AuthInput label="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+91 98765 43210" />
-          {(mode === 'login' || mode === 'register') && <AuthInput label="Password" value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" />}
-          {mode === 'verify' && <AuthInput label="6-digit OTP" value={otp} onChangeText={setOtp} keyboardType="number-pad" />}
+          {(mode === 'login' || mode === 'register' || mode === 'verify') && <AuthInput label={mode === 'verify' ? 'New Password' : 'Password'} value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" />}
+          {mode === 'verify' && <AuthInput label="6-digit OTP" value={otp} onChangeText={setOtp} keyboardType="number-pad" placeholder="123456" />}
           <Pressable onPress={handleAuth} disabled={loading} style={{ backgroundColor: ACCENT, paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 4, opacity: loading ? 0.7 : 1 }}>
             {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>{btnLabel[mode]}</Text>}
           </Pressable>
@@ -229,7 +232,7 @@ function AuthScreen() {
               <Pressable onPress={() => setMode('forgot')}><Text style={{ color: C.textSub, fontSize: 14 }}>Forgot password</Text></Pressable>
             </>
           ) : (
-            <Pressable onPress={() => setMode('login')}><Text style={{ color: C.textSub, fontSize: 14 }}>← Back to sign in</Text></Pressable>
+            <Pressable onPress={() => { setMode('login'); setPassword(''); setOtp(''); }}><Text style={{ color: C.textSub, fontSize: 14 }}>← Back to sign in</Text></Pressable>
           )}
         </View>
       </Animated.View>
