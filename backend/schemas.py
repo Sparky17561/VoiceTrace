@@ -59,3 +59,21 @@ class AudioSessionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    day_date: str
+    role: str
+    content: str
+    message_type: str
+    associated_session: Optional[AudioSessionResponse] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class IntentResponse(BaseModel):
+    intent: str
+    user_message: ChatMessageResponse
+    assistant_message: ChatMessageResponse
+    session: Optional[AudioSessionResponse] = None

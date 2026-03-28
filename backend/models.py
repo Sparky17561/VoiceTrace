@@ -7,6 +7,7 @@ class AudioSession(Base):
     __tablename__ = "audio_sessions"
     
     id = Column(Integer, primary_key=True, index=True)
+    day_date = Column(String, index=True) # Ex: "2026-03-28"
     created_at = Column(DateTime, default=datetime.utcnow)
     
     raw_text = Column(String, nullable=True)
@@ -42,3 +43,17 @@ class SessionEntry(Base):
     amount_type = Column(String, nullable=False) # 'exact', 'range', 'approx'
     
     session = relationship("AudioSession", back_populates="entries")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    day_date = Column(String, index=True)
+    role = Column(String, nullable=False) # "user", "assistant"
+    content = Column(Text, nullable=False) # Transcription or AI text response
+    message_type = Column(String, default="text") # "text" or "ledger_card"
+    
+    associated_session_id = Column(Integer, ForeignKey("audio_sessions.id"), nullable=True)
+    associated_session = relationship("AudioSession")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)

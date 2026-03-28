@@ -11,37 +11,46 @@ load_dotenv("../.env")
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
 
-SYSTEM_PROMPT = """You are an expert AI financial data extractor for Indian street vendors. You process mixed Hindi/English/Marathi text.
+SYSTEM_PROMPT = """You are an expert AI financial data extractor AND chat assistant for Indian street vendors. You process mixed Hindi/English/Marathi text.
 
-CRITICAL RULES:
-1. Identify all financial entries as strictly "REVENUE" (money earned/sales) or "EXPENSE" (money spent, buying goods, inventory, rent, bribes, wages).
-2. For EVERY entry, you MUST extract the numeric amount and strictly place it in the "value" field. Never leave "value" as null if an amount is spoken!
-3. Buying inventory or "saman laya" or "kharcha" is ALWAYS an EXPENSE.
-4. "Kamaye" or "beka" or "bech kar" is ALWAYS REVENUE.
-
-PROFIT CALCULATION:
-- Net Profit = (Total Revenue) - (Total Expenses)
-- Place the final computed integer in `profit.value`.
+You receive a spoken Transcript from the user, and a Context of today's ledger entries.
+You MUST decide if the user is RECORDING a new transaction OR ASKING a query about their data.
 
 CRITICAL JSON FORMAT:
-{
-  "raw_text": "...",
-  "normalized_text": "...",
-  "entries": [
-    {"entry_type": "REVENUE", "item_name": "mangoes", "value": 1000, "type": "exact"},
-    {"entry_type": "EXPENSE", "item_name": "auto fare", "value": 50, "type": "exact"},
-    {"entry_type": "EXPENSE", "item_name": "inventory goods", "value": 200, "type": "exact"}
-  ],
-  "profit": {"value": 750, "type": "exact"},
-  "confidence": "high",
-  "insight": "Good margins today.",
-  "suggestion": "Track inventory costs."
-}
+You must strictly return JSON matching ONE of these two intents:
 
-Do NOT put amounts inside `item_name`. Put them in `value`.
+Intent 1: TRANSACTION (The user stated they earned, sold, bought, or spent money)
+{
+  "intent": "transaction",
+  "transaction_data": {
+    "raw_text": "...",
+    "normalized_text": "...",
+    "entries": [
+      {"entry_type": "REVENUE", "item_name": "mangoes", "value": 1000, "type": "exact"},
+      {"entry_type": "EXPENSE", "item_name": "auto fare", "value": 50, "type": "exact"}
+    ],
+    "profit": {"value": 950, "type": "exact"},
+    "confidence": "high",
+    "insight": "Good margins today.",
+    "suggestion": "Track inventory costs."
+  }
+}
+* Buying inventory or "saman laya" or "kharcha" is ALWAYS an EXPENSE.
+* "Kamaye" or "beka" or "bech kar" is ALWAYS REVENUE.
+* Do NOT put amounts inside `item_name`. Put them strictly in `value`.
+
+Intent 2: QUERY (The user is asking a question about their day, e.g. "How much did I spend today?", "What is my total profit?")
+{
+  "intent": "query",
+  "query_text": "You have spent 500 rupees today on auto fare. Your total profit so far is 1200 rupees."
+}
+* You MUST answer the user's question accurately using ONLY the Context provided below. Answer in the same language they asked.
+
+Context of Today's Ledger:
+{context_str}
 """
 
-def process_audio_pipeline(audio_file_path: str):
+def process_audio_pipeline(audio_file_path: str, context_str: str = "No entries yet today."):
     import time
     import requests
     start_t = time.time()
@@ -56,7 +65,6 @@ def process_audio_pipeline(audio_file_path: str):
             files = { "file": ("audio.m4a", file, "audio/m4a") }
             data = { "model": "whisper-large-v3-turbo" }
             
-            # Direct POST bypasses the brittle Groq Python SDK connection issues
             response = requests.post(url, headers=headers, files=files, data=data, timeout=45)
             
         if response.status_code != 200:
@@ -65,28 +73,28 @@ def process_audio_pipeline(audio_file_path: str):
         transcription_text = response.json().get("text", "")
         print(f"[{time.time() - start_t:.2f}s] Whisper completed!")
         
-        # We must reassign this to exactly 'transcript' down below
         class FakeTranscription:
             text = transcription_text
         transcription = FakeTranscription()
         
     except Exception as e:
         print(f"[{time.time() - start_t:.2f}s] Whisper FAILED: {str(e)}")
-        return safe_fallback(f"Could not read audio: {str(e)}")
+        return {"intent": "query", "query_text": f"Could not read audio: {str(e)}"}
         
     transcript = transcription.text.strip()
     if not transcript:
-        return safe_fallback("No voice detected.")
+        return {"intent": "query", "query_text": "No voice detected. Please try recording again."}
 
     print(f"[{time.time() - start_t:.2f}s] Transcript received: '{transcript}'")
 
-    # 2. Extract with Llama 3.1
+    # 2. Extract or Query with Llama 3.1
     for attempt in range(2):
-        print(f"[{time.time() - start_t:.2f}s] Starting Extraction (Attempt {attempt + 1})...")
+        print(f"[{time.time() - start_t:.2f}s] Starting Intent/Extraction (Attempt {attempt + 1})...")
         try:
+            formatted_prompt = SYSTEM_PROMPT.replace("{context_str}", context_str)
             completion = client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": formatted_prompt},
                     {"role": "user", "content": f"Transcript: {transcript}"}
                 ],
                 model="llama-3.1-8b-instant",
@@ -97,21 +105,33 @@ def process_audio_pipeline(audio_file_path: str):
             print(f"[{time.time() - start_t:.2f}s] Llama extraction successful!")
             parsed = json.loads(raw_json)
             
-            # 3. Pydantic validation
-            validated = AudioSessionExtraction(**parsed)
-            # Guarantee raw transcript matches true Whisper output
-            validated.raw_text = transcript
-            return validated.model_dump()
+            intent = parsed.get("intent", "transaction")
+            if intent == "query":
+                return {
+                    "intent": "query",
+                    "raw_text": transcript,
+                    "query_text": parsed.get("query_text", "I'm sorry, I couldn't generate a proper response to that.")
+                }
+            else:
+                # 3. Pydantic validation for transaction
+                transaction_data = parsed.get("transaction_data", parsed) # Fallback if nested incorrectly
+                validated = AudioSessionExtraction(**transaction_data)
+                validated.raw_text = transcript
+                return {
+                    "intent": "transaction",
+                    "data": validated.model_dump()
+                }
             
         except (json.JSONDecodeError, ValidationError) as e:
             print(f"[{time.time() - start_t:.2f}s] Extraction Exception: {e}")
-            if hasattr(e, 'errors'):
-                print(f"Pydantic errors: {e.errors()}")
-            print(f"Raw JSON was: {raw_json}")
             if attempt == 1:
-                return safe_fallback(transcript, [f"Extraction failed: {str(e)}"])
+                return {
+                    "intent": "query", 
+                    "raw_text": transcript,
+                    "query_text": "I heard you, but my extraction mathematically failed to parse the meaning perfectly."
+                }
                 
-    return safe_fallback(transcript, ["Fatal fallback execution"])
+    return {"intent": "query", "raw_text": transcript, "query_text": "Fatal fallback execution."}
 
 def safe_fallback(transcript_text: str, warnings: list = []):
     return {
