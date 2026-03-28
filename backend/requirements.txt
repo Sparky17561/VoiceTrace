@@ -5,3 +5,10 @@ python-multipart
 groq
 pydantic
 fpdf2
+PyJWT
+cryptography
+python-dotenv
+requests
+passlib
+bcrypt==3.1.7
+python-jose[cryptography]
