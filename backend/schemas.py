@@ -15,6 +15,7 @@ class EntrySchema(BaseModel):
     min: Optional[float] = None
     max: Optional[float] = None
     type: str = "approx"
+    quantity: Optional[float] = None
     stockout_flag: bool = False
     lost_sales_flag: bool = False
 
@@ -44,6 +45,7 @@ class SessionEntryResponse(BaseModel):
     min: Optional[float] = None
     max: Optional[float] = None
     amount_type: str
+    quantity: Optional[float] = None
     stockout_flag: bool = False
     lost_sales_flag: bool = False
 

@@ -48,6 +48,9 @@ Detect stockout phrases:
 If stockout_flag is true AND revenue > 0 → keep revenue as partial sale.
 If lost_sales_flag is true → add insight: "Lost potential sales due to stock shortage".
 
+CRITICAL LANGUAGE RULE: 
+The 'insight', 'suggestion', or 'query_text' strings you output in the JSON MUST be in the exact same language the user spoke in (Marathi → Marathi, Hindi → Hindi, English → English). Do NOT default to English or Hindi if the user speaks Marathi!
+
 CRITICAL JSON FORMAT:
 You must strictly return valid JSON matching ONE of these THREE intents. 
 - NEVER INCLUDE COMMENTS, NOTES, OR EXPLANATIONS INSIDE THE JSON (e.g. no # or //). 
@@ -61,9 +64,9 @@ Intent 1: TRANSACTION (The user stated they earned, sold, bought, or spent money
     "raw_text": "...",
     "normalized_text": "...",
     "entries": [
-      {"entry_type": "REVENUE", "item_name": "mangoes", "value": 1000, "type": "exact", "stockout_flag": false, "lost_sales_flag": false},
-      {"entry_type": "REVENUE", "item_name": "vadapav", "value": 240, "type": "exact", "stockout_flag": true, "lost_sales_flag": true},
-      {"entry_type": "EXPENSE", "item_name": "auto fare", "value": 50, "type": "exact", "stockout_flag": false, "lost_sales_flag": false}
+      {"entry_type": "REVENUE", "item_name": "mangoes", "quantity": 10, "value": 1000, "type": "exact", "stockout_flag": false, "lost_sales_flag": false},
+      {"entry_type": "REVENUE", "item_name": "vadapav", "quantity": 16, "value": 240, "type": "exact", "stockout_flag": true, "lost_sales_flag": true},
+      {"entry_type": "EXPENSE", "item_name": "auto fare", "quantity": 1, "value": 50, "type": "exact", "stockout_flag": false, "lost_sales_flag": false}
     ],
     "profit": {"value": 950, "type": "exact"},
     "confidence": "high",
@@ -106,7 +109,7 @@ def process_audio_pipeline(audio_file_path: str, context_str: str = "No entries 
         
         with open(audio_file_path, "rb") as file:
             files = { "file": ("audio.m4a", file, "audio/m4a") }
-            data = { "model": "whisper-large-v3-turbo", "language": "hi" }
+            data = { "model": "whisper-large-v3-turbo" }
             response = requests.post(url, headers=headers, files=files, data=data, timeout=45)
             
         if response.status_code != 200:

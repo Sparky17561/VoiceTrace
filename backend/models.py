@@ -79,6 +79,7 @@ class SessionEntry(Base):
     min = Column(Float, nullable=True)
     max = Column(Float, nullable=True)
     amount_type = Column(String, nullable=False)  # 'exact', 'range', 'approx'
+    quantity = Column(Float, nullable=True)
     
     # ── NEW: Stockout intelligence ──
     stockout_flag = Column(Boolean, default=False)    # item ran out
@@ -124,6 +125,7 @@ class UdhariEntry(Base):
     direction = Column(String, default="given")   # "given" (I gave) | "taken" (I received)
     status = Column(String, default="pending")    # "pending" | "paid"
     note = Column(String, nullable=True)
+    audio_url = Column(String, nullable=True)     # originating voice recording
     created_at = Column(DateTime, default=datetime.utcnow)
     
     person = relationship("UdhariPerson", back_populates="entries")

@@ -24,7 +24,8 @@ Classify into ONE intent. Provide action_data as specified:
    - If price missing: set intent='multi_turn', ask price.
 
 2. 'log_transaction': Record a sale or expense.
-   - action_data: {"entries": [{"type": "REVENUE"|"EXPENSE", "item": "...", "amount": number}]}
+   - action_data: {"entries": [{"type": "REVENUE"|"EXPENSE", "item": "...", "amount": number, "quantity": number}]}
+   - CRITICAL CALCULATION: For REVENUE, quantity MUST be explicitly extracted (e.g. "6 samosa" -> quantity=6). If the user doesn't state a total price, you MUST calculate the `amount` by multiplying `quantity` * `price_per_unit` from the Menu. If the user states a total price, use that as `amount`.
 
 3. 'add_udhari': Someone took goods/cash on credit.
    - action_data: {"person_name": "...", "amount": number, "direction": "given", "item": "..."}
@@ -54,17 +55,21 @@ Classify into ONE intent. Provide action_data as specified:
 
 9. 'multi_turn': Ambiguous input or needs clarification.
    - action_data: null
-   - If input has NO clear business context (e.g. "bas thoda kaam kiya", "kuch hua"), ask: "Kya aap sales, expenses, ya udhari record karna chahte ho?"
+   - If input has NO clear business context (e.g. "bas thoda kaam kiya"), ask them if they want to record sales/expenses/udhari, but TRANSLATE exactly into their language (Marathi/Hindi/English).
    - If user is CORRECTING a previous entry (e.g. "nahi 12 vadapav tha"), set intent='log_transaction' and record the corrected amount.
 
 === RULES ===
-- Answer in same language as user (Hindi → Hindi, English → English, Hinglish → Hinglish).
+- CRITICAL LANGUAGE RULE: You MUST reply in the EXACT same language that the user spoke in! 
+   * If the user speaks Marathi (e.g. "kiti samose vikle?"), answer fluently in Marathi.
+   * If the user speaks English, answer purely in English.
+   * If the user speaks Hindi/Hinglish, answer in Hindi/Hinglish.
+   * Do NOT default to Hindi if the user is speaking another language!
 - Keep replies to 1-2 lines, direct and actionable.
 - For queries, USE THE EXACT NUMBERS from context. Never say "I don't know" if data is present.
 - For growth trend: compare numbers and clearly state "Badhi" (increased) or "Ghati" (decreased).
 - Never make up revenue numbers not in context.
-- IMPORTANT: If the user provides a RANGE or ambiguous quantity for logging a transaction (e.g. "40-50 samose beche", "10-12 log aaye"), DO NOT log it. Set intent='multi_turn' and ask them for the EXACT number.
-- IMPORTANT: If the user reports selling an item that is completely NOT in the 'Menu' context, DO NOT use 'log_transaction'. Set intent='multi_turn' and inform them: "I don't see [Item] in your menu yet. Should I add it as a new menu item?"
+- IMPORTANT: If the user provides a RANGE or ambiguous quantity for logging a transaction, DO NOT log it. Set intent='multi_turn' and ask them for the EXACT number, translating the question into their native language.
+- IMPORTANT: If the user reports selling an item NOT in the 'Menu' context, DO NOT use 'log_transaction'. Set intent='multi_turn' and inform them: "I don't see [Item] in your menu yet. Should I add it as a new menu item?" (TRANSLATE this exactly into their native language like Marathi or Hindi).
 
 === OUTPUT FORMAT ===
 Return ONLY valid JSON:
@@ -89,7 +94,12 @@ def process_ask(text: str, context: Dict[str, Any]):
         rev = d.get('revenue', 0)
         exp = d.get('expense', 0)
         profit = rev - exp
-        daily_lines.append(f"  {d['date']}: revenue=₹{rev}, expense=₹{exp}, profit=₹{profit}")
+        items_dict = d.get('items_sold', {})
+        if items_dict:
+            items_str = ", ".join([f"{v}x {k}" for k, v in items_dict.items()])
+            daily_lines.append(f"  {d['date']}: revenue=₹{rev}, expense=₹{exp}, profit=₹{profit}, ITEMS SOLD: {items_str}")
+        else:
+            daily_lines.append(f"  {d['date']}: revenue=₹{rev}, expense=₹{exp}, profit=₹{profit}")
     
     daily_summary_str = "\n".join(daily_lines) if daily_lines else "  No data yet."
     

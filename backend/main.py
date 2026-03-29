@@ -35,17 +35,18 @@ Base.metadata.create_all(bind=engine)
 
 # ── Migration shim: add new columns to existing tables (idempotent) ──
 def run_migrations():
-    with engine.connect() as conn:
-        migrations = [
-            "ALTER TABLE session_entries ADD COLUMN stockout_flag BOOLEAN DEFAULT 0",
-            "ALTER TABLE session_entries ADD COLUMN lost_sales_flag BOOLEAN DEFAULT 0",
-        ]
-        for sql in migrations:
-            try:
+    migrations = [
+        "ALTER TABLE session_entries ADD COLUMN stockout_flag BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE session_entries ADD COLUMN lost_sales_flag BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE session_entries ADD COLUMN quantity FLOAT",
+    ]
+    for sql in migrations:
+        try:
+            with engine.connect() as conn:
                 conn.execute(text(sql))
                 conn.commit()
-            except Exception:
-                pass  # Column already exists
+        except Exception:
+            pass  # Column already exists
 
 run_migrations()
 
@@ -211,6 +212,7 @@ class MenuItemResponse(BaseModel):
     id: int
     item_name: str
     price_per_unit: float
+    sold_today: Optional[float] = 0.0
 
 class StallResponse(BaseModel):
     id: int
@@ -222,7 +224,32 @@ class StallResponse(BaseModel):
 
 @app.get("/stalls", response_model=List[StallResponse])
 def get_stalls(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return user.stalls
+    result = []
+    today = datetime.utcnow().date().isoformat()
+    for s in user.stalls:
+        stall_dict = {"id": s.id, "name": s.name, "location": s.location, "menu_items": []}
+        
+        todays_sales = defaultdict(float)
+        sessions = db.query(models.AudioSession).filter(models.AudioSession.stall_id == s.id, models.AudioSession.day_date == today).all()
+        for sess in sessions:
+            for entry in sess.entries:
+                if entry.entry_type == "REVENUE" and entry.item_name:
+                    todays_sales[entry.item_name.lower().strip()] += (entry.quantity or 1.0)
+                    
+        for m in s.menu_items:
+            s_name = m.item_name.lower().strip()
+            sold = todays_sales.get(s_name, 0.0)
+            if not sold: 
+                valid_names = list(todays_sales.keys())
+                if valid_names:
+                    import difflib
+                    matches = difflib.get_close_matches(s_name, valid_names, n=1, cutoff=0.5)
+                    if matches: sold = todays_sales[matches[0]]
+            stall_dict["menu_items"].append({
+                "id": m.id, "item_name": m.item_name, "price_per_unit": m.price_per_unit, "sold_today": sold
+            })
+        result.append(stall_dict)
+    return result
 
 @app.post("/stalls", response_model=StallResponse)
 def create_stall(stall_in: StallCreate, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -454,7 +481,7 @@ def _save_result(result: dict, stall_id: int, day_date: str, audio_url: Optional
         
         entry = models.UdhariEntry(
             person_id=person.id, stall_id=stall_id,
-            item=item, amount=amount, direction=direction
+            item=item, amount=amount, direction=direction, audio_url=audio_url
         )
         db.add(entry)
         db_s = models.AudioSession(
@@ -489,6 +516,7 @@ def _save_result(result: dict, stall_id: int, day_date: str, audio_url: Optional
                 item_name=e.get("item_name"),
                 value=e.get("value"),
                 amount_type=e.get("type", "approx"),
+                quantity=e.get("quantity"),
                 stockout_flag=bool(e.get("stockout_flag", False)),
                 lost_sales_flag=bool(e.get("lost_sales_flag", False)),
             ))
@@ -535,6 +563,16 @@ def search_entries(stall_id: int, query: str, user: models.User = Depends(get_cu
         or_(*[models.SessionEntry.item_name.ilike(f"%{s}%") for s in syns] + filters)
     ).distinct().all()
 
+@app.delete("/history")
+def reset_history(stall_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stall = db.query(models.Stall).filter(models.Stall.id == stall_id, models.Stall.user_id == user.id).first()
+    if not stall: raise HTTPException(404, "Stall not found")
+    db.query(models.SessionEntry).filter(models.SessionEntry.session_id.in_(db.query(models.AudioSession.id).filter(models.AudioSession.stall_id == stall_id))).delete(synchronize_session=False)
+    db.query(models.AudioSession).filter(models.AudioSession.stall_id == stall_id).delete(synchronize_session=False)
+    db.query(models.ChatMessage).filter(models.ChatMessage.stall_id == stall_id).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "History cleared"}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ANALYTICS — DAILY SUMMARY
 # ─────────────────────────────────────────────────────────────────────────────
@@ -562,9 +600,12 @@ def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get
         for entry in session.entries:
             name = entry.item_name or "Unknown"
             if name not in daily_data[d]["items"]:
-                daily_data[d]["items"][name] = {"revenue": 0, "stockout": False, "lost_sales": False}
+                daily_data[d]["items"][name] = {"revenue": 0, "expense": 0, "quantity": 0, "stockout": False, "lost_sales": False}
             if entry.entry_type == "REVENUE":
                 daily_data[d]["items"][name]["revenue"] += entry.value or 0
+            else:
+                daily_data[d]["items"][name]["expense"] += entry.value or 0
+            daily_data[d]["items"][name]["quantity"] += entry.quantity or 0
             if entry.stockout_flag: daily_data[d]["items"][name]["stockout"] = True
             if entry.lost_sales_flag: daily_data[d]["items"][name]["lost_sales"] = True
 
@@ -667,6 +708,7 @@ def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get
 
 @app.post("/ask")
 def ask(
+    request: Request,
     stall_id: int = Form(...),
     text: Optional[str] = Form(None),
     session_context: Optional[str] = Form(None),
@@ -677,22 +719,35 @@ def ask(
     stall = db.query(models.Stall).filter(models.Stall.id == stall_id, models.Stall.user_id == user.id).first()
     if not stall: raise HTTPException(404, "Stall not found")
 
-    # If audio provided, transcribe first
+    # If audio provided, transcribe and save permanently
     transcript = text
+    audio_url = None
     if audio:
         from groq_service import client as groq_client
-        tmp_name = f"ask_{uuid.uuid4()}.m4a"
-        with open(tmp_name, "wb") as f:
+        import shutil
+        unique_filename = f"ask_{uuid.uuid4()}.m4a"
+        audio_path = os.path.join("static/audio", unique_filename)
+        # Save permanently first
+        with open(audio_path, "wb") as f:
             f.write(audio.file.read())
         try:
-            with open(tmp_name, "rb") as f:
-                ts = groq_client.audio.transcriptions.create(file=(tmp_name, f.read()), model="whisper-large-v3-turbo", language="hi")
+            with open(audio_path, "rb") as f:
+                ts = groq_client.audio.transcriptions.create(file=(audio_path, f.read()), model="whisper-large-v3-turbo")
                 transcript = ts.text
-        finally:
-            if os.path.exists(tmp_name): os.remove(tmp_name)
+        except Exception as e:
+            print(f"Whisper error: {e}")
+            transcript = text
 
     if not transcript:
         raise HTTPException(400, "No text or audio provided")
+
+    # Build the audio_url properly using the real request base_url
+    if audio and 'unique_filename' in dir():
+        try:
+            base_url = str(request.base_url).rstrip("/")
+            audio_url = f"{base_url}/static/audio/{unique_filename}"
+        except Exception:
+            audio_url = None
 
     # 1. Fetch Comprehensive Context
     menu = [{"id": m.id, "item_name": m.item_name, "price": m.price_per_unit} for m in stall.menu_items]
@@ -701,16 +756,18 @@ def ask(
     sessions = db.query(models.AudioSession).filter(models.AudioSession.stall_id == stall_id, models.AudioSession.day_date >= cutoff).all()
     
     # ── POPULATE SUMMARY ──
-    daily = defaultdict(lambda: {"revenue": 0, "expense": 0, "stockout_items": []})
+    daily = defaultdict(lambda: {"revenue": 0, "expense": 0, "stockout_items": [], "items_sold": defaultdict(int)})
     for s in sessions:
         daily[s.day_date]["revenue"] += s.total_revenue or 0
         daily[s.day_date]["expense"] += s.total_expense or 0
         for e in s.entries:
             if e.stockout_flag and e.item_name:
                 daily[s.day_date]["stockout_items"].append(e.item_name)
+            if e.entry_type == "REVENUE" and e.item_name:
+                daily[s.day_date]["items_sold"][e.item_name] += int(e.quantity or 1)
     
     summary_data = [
-        {"date": d, "revenue": v["revenue"], "expense": v["expense"], "stockout": v["stockout_items"]}
+        {"date": d, "revenue": v["revenue"], "expense": v["expense"], "stockout": v["stockout_items"], "items_sold": dict(v["items_sold"])}
         for d, v in sorted(daily.items(), reverse=True)
     ]
     
@@ -737,19 +794,38 @@ def ask(
     if intent == "log_transaction":
         entries = []
         tr, te = 0, 0
+        import difflib
+        valid_names = [m["item_name"] for m in menu]
         for e in action_data.get("entries", []):
             amt = e.get("amount", 0)
+            qty = e.get("quantity")
             ety = e.get("type", "REVENUE")
+            raw_item = e.get("item", "")
+            
+            # ── BULLETPROOF BACKEND MATH OVERRIDE ──
+            if ety == "REVENUE" and qty and raw_item:
+                try:
+                    num_qty = float(qty)
+                    if num_qty > 0:
+                        matches = difflib.get_close_matches(raw_item.lower(), [n.lower() for n in valid_names], n=1, cutoff=0.5)
+                        if matches:
+                            match = next((m for m in menu if m["item_name"].lower() == matches[0]), None)
+                            if match:
+                                amt = num_qty * float(match["price"])
+                                raw_item = match["item_name"]
+                except ValueError:
+                    pass
+            
             if ety == "REVENUE": tr += amt
             else: te += amt
-            entries.append({"entry_type": ety, "item_name": e.get("item", ""), "value": amt, "type": "exact"})
+            entries.append({"entry_type": ety, "item_name": raw_item, "value": amt, "type": "exact", "quantity": qty})
         preview_result = {
             "intent": "transaction",
             "raw_text": transcript,
             "data": {"raw_text": transcript, "insight": reply, "entries": entries, "profit": {"value": tr - te}}
         }
         # No menu check here — the popup IS the confirmation. Menu check only applies to text /process-text-preview.
-        return {"intent": "transaction", "reply": reply, "show_preview": True, "result": preview_result}
+        return {"intent": "transaction", "reply": reply, "show_preview": True, "result": preview_result, "audio_url": audio_url}
 
     elif intent == "add_udhari":
         preview_result = {
@@ -762,7 +838,7 @@ def ask(
                 "direction": action_data.get("direction", "given")
             }
         }
-        return {"intent": "udhari", "reply": reply, "show_preview": True, "result": preview_result}
+        return {"intent": "udhari", "reply": reply, "show_preview": True, "result": preview_result, "audio_url": audio_url}
     # ─────────────────────────────────────────────────────────────────────────
 
     result = raw_result
@@ -915,7 +991,8 @@ def get_udhari(stall_id: int, user: models.User = Depends(get_current_user), db:
             "created_at": p.created_at.isoformat(),
             "pending_total": pending,
             "entries": [{"id": e.id, "item": e.item, "amount": e.amount, "direction": e.direction,
-                         "status": e.status, "note": e.note, "created_at": e.created_at.isoformat()}
+                         "status": e.status, "note": e.note, "audio_url": e.audio_url,
+                         "created_at": e.created_at.isoformat()}
                         for e in sorted(p.entries, key=lambda x: x.created_at, reverse=True)]
         })
     return result
