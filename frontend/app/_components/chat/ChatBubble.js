@@ -114,7 +114,11 @@ export default function ChatBubble({ msg }) {
                   </AppText>
                 </View>
                 <AppText style={{ flex: 1, color: C.text, fontSize: 14 }} numberOfLines={1}>{e.quantity ? `${e.quantity}x ` : ''}{e.item_name || '—'}</AppText>
-                {e.stockout_flag && <FontAwesome5 name="exclamation-triangle" size={11} color={C.amber} />}
+                {e.stockout_flag && (
+                  <View style={{ backgroundColor: C.rose, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, marginRight: 6 }}>
+                    <AppText style={{ color: '#fff', fontSize: 8, fontWeight: '900' }}>{i18n.t('soldOutBadge')}</AppText>
+                  </View>
+                )}
                 <AppText style={{ color: isRev ? C.teal : C.rose, fontSize: 14, fontWeight: '800', fontFamily: FONT_MONO }}>
                   {fmtAmt(e)}
                 </AppText>

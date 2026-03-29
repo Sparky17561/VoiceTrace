@@ -38,11 +38,12 @@ Classify into ONE intent. Provide action_data as specified:
    - action_data: {"person_name": "...", "amount": number}
    - Use when user mentions a specific amount paid back (e.g. "Ramu ne 50 rupaye diye")
 
-6. 'query_business': User asks about their revenue, profit, sales, trends.
+6. 'query_business': User asks about their revenue, profit, sales, trends, or item performance.
    - action_data: null
    - IMPORTANT: Use the exact numbers from the CONTEXT provided. Do not guess. Answer directly.
    - For "kal ka revenue": look at yesterday's data in the summary.
    - For "last 3 days trend": compare last 3 days totals and state clearly if up or down.
+   - For "most sold item" / "sabse zyada bika" / "konsa item jyada bika": look at "All-time Items Sold" in context, find the item with highest units, and reply with BOTH the item name AND the total quantity (e.g. "Samosa - 150 units"). NEVER make up numbers.
 
 7. 'loan_estimator': User asks about loan eligibility or limit.
    - action_data: null
@@ -95,22 +96,37 @@ def process_ask(text: str, context: Dict[str, Any]):
         exp = d.get('expense', 0)
         profit = rev - exp
         items_dict = d.get('items_sold', {})
+        stockout = d.get('stockout', [])
+        parts = []
         if items_dict:
-            items_str = ", ".join([f"{v}x {k}" for k, v in items_dict.items()])
-            daily_lines.append(f"  {d['date']}: revenue=₹{rev}, expense=₹{exp}, profit=₹{profit}, ITEMS SOLD: {items_str}")
-        else:
-            daily_lines.append(f"  {d['date']}: revenue=₹{rev}, expense=₹{exp}, profit=₹{profit}")
+            parts.append("ITEMS SOLD: " + ", ".join([f"{v}x {k}" for k, v in items_dict.items()]))
+        if stockout:
+            parts.append("STOCKOUT: " + ", ".join(stockout))
+        detail = " | ".join(parts) if parts else ""
+        daily_lines.append(f"  {d['date']}: revenue=\u20b9{rev}, expense=\u20b9{exp}, profit=\u20b9{profit}" + (f" | {detail}" if detail else ""))
     
     daily_summary_str = "\n".join(daily_lines) if daily_lines else "  No data yet."
     
+    # Cumulative items sold summary (for 'most sold item' queries)
+    all_items: Dict[str, int] = {}
+    for d in summary:
+        for item, qty in d.get('items_sold', {}).items():
+            all_items[item] = all_items.get(item, 0) + qty
+    if all_items:
+        sorted_items = sorted(all_items.items(), key=lambda x: x[1], reverse=True)
+        cumulative_str = ", ".join([f"{k}: {v} units" for k, v in sorted_items[:10]])
+        cumulative_block = f"\nAll-time Items Sold (last 10 days total): {cumulative_str}"
+    else:
+        cumulative_block = ""
+    
     # Udhari summary
     udhari = context.get('udhari', [])
-    udhari_lines = [f"  {u['name']}: owes ₹{u['pending']}" for u in udhari if u.get('pending', 0) > 0]
+    udhari_lines = [f"  {u['name']}: owes \u20b9{u['pending']}" for u in udhari if u.get('pending', 0) > 0]
     udhari_str = "\n".join(udhari_lines) if udhari_lines else "  No pending udhari."
     
     # Menu
     menu = context.get('menu', [])
-    menu_str = ", ".join([f"{m['item_name']} (₹{m['price']})" for m in menu]) or "No items yet."
+    menu_str = ", ".join([f"{m['item_name']} (\u20b9{m['price']})" for m in menu]) or "No items yet."
     
     context_block = f"""
 === YOUR BUSINESS DATA ===
@@ -118,7 +134,7 @@ Today: {today}
 Menu: {menu_str}
 
 Daily Revenue (last 10 days):
-{daily_summary_str}
+{daily_summary_str}{cumulative_block}
 
 Udhari (credit) outstanding:
 {udhari_str}

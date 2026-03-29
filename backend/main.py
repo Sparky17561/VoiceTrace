@@ -865,6 +865,8 @@ def ask(
             qty = e.get("quantity")
             ety = e.get("type", "REVENUE")
             raw_item = e.get("item", "")
+            stockout = bool(e.get("stockout_flag", False))
+            lost_sales = bool(e.get("lost_sales_flag", False))
             
             # ── BULLETPROOF BACKEND MATH OVERRIDE ──
             if ety == "REVENUE" and qty and raw_item:
@@ -882,7 +884,15 @@ def ask(
             
             if ety == "REVENUE": tr += amt
             else: te += amt
-            entries.append({"entry_type": ety, "item_name": raw_item, "value": amt, "type": "exact", "quantity": qty})
+            entries.append({
+                "entry_type": ety,
+                "item_name": raw_item,
+                "value": amt,
+                "type": "exact",
+                "quantity": qty,
+                "stockout_flag": stockout,
+                "lost_sales_flag": lost_sales,
+            })
         preview_result = {
             "intent": "transaction",
             "raw_text": transcript,

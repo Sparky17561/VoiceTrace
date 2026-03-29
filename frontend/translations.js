@@ -41,6 +41,7 @@ const translations = {
     businessBrainSub: "Speak or type to log sales, track udhari,\nask questions in any language.",
     thirtyDays: "30 Days",
     outOfStock: "Out of Stock",
+    soldOutBadge: "SOLD OUT",
     wentOutOfStockToday: "Went out of stock today.",
     recordedOn: "Recorded on",
     loanEstimator: "LOAN ESTIMATOR",
@@ -76,6 +77,9 @@ const translations = {
     reason_trend_rising: "Sales trend is rising; prepare for higher volume.",
     reason_trend_falling: "Recent interest in this item is cooling off.",
     reason_stable: "Sales are stable.",
+    reason_normal: "Normal sales pattern.",
+    reason_stockout: "Early stockout detected; demand estimated at 120% of baseline.",
+    reason_lost_sales: "Customers were turned away; demand estimated at 130% of baseline.",
     pm_svanidhi_reason: "Your profit is growing; micro-credit can help you scale fast.",
     mudra_loan_reason: "You qualify for expansion-tier loans to add more stalls.",
     shishu_loan_reason: "High revenue suggests high turnover. Bulk buys can save you money.",
@@ -105,7 +109,11 @@ const translations = {
     
     // Common Items
     "Vada pav": "Vada pav",
+    "Vadapav": "Vadapav",
+    "vadapav": "Vadapav",
     "Samosa": "Samosa",
+    "samosa": "Samosa",
+    "Watermelon Juice": "Watermelon Juice",
     "Chai": "Chai",
     "Poha": "Poha",
     "Coffee": "Coffee"
@@ -149,6 +157,7 @@ const translations = {
     businessBrainSub: "बिक्री दर्ज करने, उधारी ट्रैक करने के लिए बोलें या लिखें,\nकिसी भी भाषा में प्रश्न पूछें।",
     thirtyDays: "30 दिन",
     outOfStock: "स्टॉक खत्म",
+    soldOutBadge: "स्टॉक खत्म",
     wentOutOfStockToday: "आज स्टॉक खत्म हुआ।",
     recordedOn: "रिकॉर्ड किया गया:",
     loanEstimator: "लोन अनुमान",
@@ -184,6 +193,9 @@ const translations = {
     reason_trend_rising: "बिक्री का रुझान बढ़ रहा है; अधिक बिक्री के लिए तैयार रहें।",
     reason_trend_falling: "इस आइटम में हाल ही में रुचि कम हुई है।",
     reason_stable: "बिक्री स्थिर है।",
+    reason_normal: "सामान्य बिक्री पैटर्न।",
+    reason_stockout: "जल्दी स्टॉक खत्म होना पाया गया; मांग 120% अनुमानित है।",
+    reason_lost_sales: "ग्राहक वापस लौटे; मांग 130% अनुमानित है।",
     pm_svanidhi_reason: "आपका मुनाफा बढ़ रहा है; माइक्रो-क्रेडिट बढ़ने में मदद कर सकता है।",
     mudra_loan_reason: "आप नई दुकानें खोलने के लिए बड़े लोन के पात्र हैं।",
     shishu_loan_reason: "ज्यादा टर्नओवर के संकेत हैं। थोक खरीद से पैसे बचेंगे।",
@@ -213,7 +225,11 @@ const translations = {
     
     // Common Items
     "Vada pav": "वड़ा पाव",
+    "Vadapav": "वड़ा पाव",
+    "vadapav": "वड़ा पाव",
     "Samosa": "समोसा",
+    "samosa": "समोसा",
+    "Watermelon Juice": "तरबूज का जूस",
     "Chai": "चाय",
     "Poha": "पोहा",
     "Coffee": "कॉफी"
@@ -257,6 +273,7 @@ const translations = {
     businessBrainSub: "विक्री नोंदवण्यासाठी, उधारी ट्रॅक करण्यासाठी बोला किंवा लिहा,\nकोणत्याही भाषेत प्रश्न विचारा.",
     thirtyDays: "30 दिवस",
     outOfStock: "स्टॉक संपला",
+    soldOutBadge: "स्टॉक संपला",
     wentOutOfStockToday: "आज स्टॉक संपला.",
     recordedOn: "रेकॉर्ड केले:",
     loanEstimator: "कर्ज अंदाज",
@@ -292,6 +309,9 @@ const translations = {
     reason_trend_rising: "विक्रीचा कल वाढत आहे; अधिक विक्रीसाठी तयार रहा.",
     reason_trend_falling: "या आयटममध्ये अलीकडे रस कमी झाला आहे.",
     reason_stable: "बिक्री स्थिर आहे.",
+    reason_normal: "सामान्य विक्री पॅटर्न.",
+    reason_stockout: "लवकर स्टॉक संपल्याचे आढळले; मागणी १२०% अंदाजित आहे.",
+    reason_lost_sales: "ग्राहक परत गेले; मागणी १३०% अंदाजित आहे.",
     pm_svanidhi_reason: "तुमचा नफा वाढत आहे; मायक्रो-क्रेडिट प्रगतीसाठी मदत करू शकते.",
     mudra_loan_reason: "तुम्ही नवीन स्टॉल्स टाकण्यासाठी मोठ्या कर्जास पात्र आहात.",
     shishu_loan_reason: "जास्त टर्नओव्हरचे संकेत आहेत. घाऊक खरेदीने पैसे वाचतील.",
@@ -321,8 +341,10 @@ const translations = {
     
     // Common Items
     "Vada pav": "वडा पाव",
+    "Vadapav": "वडा पाव",
     "Samosa": "समोसा",
-    "Chai": "चाय",
+    "Watermelon Juice": "कलिंगड ज्यूस",
+    "Chai": "चहा",
     "Poha": "पोहे",
     "Coffee": "कॉफी"
   }

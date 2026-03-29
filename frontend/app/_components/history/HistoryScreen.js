@@ -240,7 +240,11 @@ export default function HistoryScreen({ toggleSidebar }) {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                               <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: isRev ? C.teal : C.rose }} />
                               <AppText style={{ color: C.text, fontSize: 14 }}>{e.quantity ? `${e.quantity}x ` : ''}{e.item_name || 'Item'}</AppText>
-                              {e.stockout_flag && <FontAwesome5 name="exclamation-circle" size={10} color={C.amber} />}
+                              {e.stockout_flag && (
+                                <View style={{ backgroundColor: C.rose, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginLeft: 6 }}>
+                                  <AppText style={{ color: '#fff', fontSize: 9, fontWeight: '900' }}>{i18n.t('soldOutBadge')}</AppText>
+                                </View>
+                              )}
                             </View>
                             <AppText style={{ color: isRev ? C.teal : C.rose, fontSize: 14, fontWeight: '700', fontFamily: FONT_MONO }}>
                               ₹{e.value || 0}

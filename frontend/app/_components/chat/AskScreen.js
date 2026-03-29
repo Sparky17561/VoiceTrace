@@ -19,7 +19,7 @@ import i18n from '../../../translations';
 export default function AskScreen({ toggleSidebar }) {
   const { token } = useContext(AuthContext);
   const { C } = useTheme();
-  const { currentDay, activeStall, playAudio, playingUrl } = useContext(AppContext);
+  const { currentDay, activeStall, playAudio, playingUrl, triggerDashboardRefresh } = useContext(AppContext);
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -137,6 +137,16 @@ export default function AskScreen({ toggleSidebar }) {
       const saveRes = await axios.post(`${API_BASE}/confirm-entry`, { result, audio_url, day_date, stall_id }, { headers: { Authorization: `Bearer ${token}` } });
       if (saveRes.data?.user_message && saveRes.data?.assistant_message) {
         setMessages(prev => [...prev, saveRes.data.user_message, saveRes.data.assistant_message]);
+        
+        // Always trigger dashboard refresh after a confirmed entry
+        triggerDashboardRefresh();
+        
+        // Flash alert for stockout
+        const isStockout = (pendingEntry.result.data?.entries || []).some(e => e.stockout_flag);
+        if (isStockout) {
+          Alert.alert("✅ SUCCESS", i18n.t('outOfStock') + " logged!");
+        }
+
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
       }
     } catch (e) {

@@ -36,7 +36,10 @@ function MainAppInner() {
   const [activeStall, setActiveStall] = useState(null);
   const [currentDay, setCurrentDay] = useState(getToday());
   const [playingUrl, setPlayingUrl] = useState(null);
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
   const soundRef = useRef(null);
+  
+  const triggerDashboardRefresh = () => setDashboardRefreshKey(k => k + 1);
 
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [initLoading, setInitLoading] = useState(true);
@@ -110,7 +113,8 @@ function MainAppInner() {
       currentDay, setCurrentDay,
       playAudio, playingUrl,
       appLocale, changeLanguage,
-      fontSizeScale, setFontSizeScale
+      fontSizeScale, setFontSizeScale,
+      dashboardRefreshKey, triggerDashboardRefresh,
     }}>
       <SafeAreaView style={{ flex: 1, backgroundColor: resolved === 'dark' ? DARK.surface : LIGHT.surface }}>
         <StatusBar barStyle={resolved === 'dark' ? 'light-content' : 'dark-content'} />

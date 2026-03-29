@@ -13,7 +13,7 @@ import i18n from '../../../translations';
 export default function DashboardScreen({ toggleSidebar }) {
   const { token } = useContext(AuthContext);
   const { C } = useTheme();
-  const { currentDay, activeStall } = useContext(AppContext);
+  const { currentDay, activeStall, dashboardRefreshKey } = useContext(AppContext);
   const [summaries, setSummaries] = useState([]);
   const [insights, setInsights] = useState({ anomalies: [], demand_highlights: [], suggestions: [] });
   const [loading, setLoading] = useState(true);
@@ -23,14 +23,16 @@ export default function DashboardScreen({ toggleSidebar }) {
   useEffect(() => {
     if (!activeStall || !token) return;
     setLoading(true);
-    axios.get(`${API_BASE}/analytics/daily-summary?stall_id=${activeStall.id}&days=30`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get(`${API_BASE}/analytics/daily-summary?stall_id=${activeStall.id}&days=30`, { 
+      headers: { Authorization: `Bearer ${token}` } 
+    })
       .then(r => {
         setSummaries(r.data.days || []);
         setInsights(r.data.engine_insights || { anomalies: [], demand_highlights: [], suggestions: [] });
       })
       .catch(() => { })
       .finally(() => setLoading(false));
-  }, [currentDay, activeStall, token]);
+  }, [currentDay, activeStall, token, dashboardRefreshKey]); // dashboardRefreshKey forces refresh after new entry
 
   const todayData = summaries.find(s => s.date === currentDay) || { total_revenue: 0, total_expense: 0, profit: 0, stockout_items: [] };
   const monthlyData = summaries.reduce((acc, curr) => {
@@ -76,6 +78,37 @@ export default function DashboardScreen({ toggleSidebar }) {
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 14 }}>
+
+          {/* Today's Stockout Alerts (FORCED TOP VISIBILITY) */}
+          {summaries.filter(s => (s.stockout_items || []).length > 0).slice(0, 3).map((dayRec, dayIdx) => (
+            <View key={dayIdx} style={{ gap: 8, marginBottom: 4 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, marginBottom: 2 }}>
+                <FontAwesome5 name="bell" size={10} color={C.rose} />
+                <AppText style={{ color: C.rose, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>
+                  {dayRec.date === currentDay ? 'ALERTS (TODAY)' : `ALERTS (${dayRec.date})`}
+                </AppText>
+              </View>
+              {dayRec.stockout_items.map((item, idx) => (
+                <View key={idx} style={{ 
+                  backgroundColor: C.roseBg, padding: 16, borderRadius: 16, 
+                  borderWidth: 1.5, borderColor: C.rose, 
+                  flexDirection: 'row', gap: 12, alignItems: 'center' 
+                }}>
+                  <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: C.rose, alignItems: 'center', justifyContent: 'center' }}>
+                    <FontAwesome5 name="exclamation-triangle" size={18} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={{ color: C.rose, fontSize: 15, fontWeight: '900' }}>
+                      {i18n.t(item)} {i18n.t('isOutOfStock')}!
+                    </AppText>
+                    <AppText style={{ color: C.rose, fontSize: 11, fontWeight: '600' }}>
+                      Reported for {dayRec.date === currentDay ? 'Today' : dayRec.date}. Check inventory!
+                    </AppText>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ))}
 
           {/* Tab Switcher */}
           <View style={{
@@ -338,11 +371,22 @@ export default function DashboardScreen({ toggleSidebar }) {
                     const color = isExp ? C.rose : C.teal;
 
                     return (
-                      <View key={itemName} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 9 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <AppText style={{ color: C.textSub, fontSize: 13, minWidth: 20 }}>{it.quantity && it.quantity > 0 ? `${it.quantity}x` : ''}</AppText>
-                          <AppText style={{ color: C.text, fontSize: 13 }}>{itemName}</AppText>
-                          {it.stockout && <FontAwesome5 name="exclamation-circle" size={10} color={C.amber} />}
+                      <View key={itemName} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 9 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                          {it.quantity > 0 && (
+                            <View style={{
+                              backgroundColor: isExp ? C.roseBg : C.tealBg,
+                              borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
+                              borderWidth: 1, borderColor: isExp ? C.roseBorder : C.tealBorder,
+                              minWidth: 32, alignItems: 'center',
+                            }}>
+                              <AppText style={{ color: isExp ? C.rose : C.teal, fontSize: 11, fontWeight: '800', fontFamily: FONT_MONO }}>
+                                {it.quantity % 1 === 0 ? it.quantity : it.quantity.toFixed(1)}x
+                              </AppText>
+                            </View>
+                          )}
+                          <AppText style={{ color: C.text, fontSize: 13, flex: 1 }}>{itemName}</AppText>
+                          {it.stockout && <FontAwesome5 name="exclamation-circle" size={10} color={C.rose} />}
                         </View>
                         <AppText style={{ color: color, fontSize: 13, fontFamily: FONT_MONO }}>{sign}₹{Math.round(val || 0)}</AppText>
                       </View>
