@@ -28,6 +28,7 @@ from schemas import (
 )
 from groq_service import process_audio_pipeline, process_text_pipeline, translate_search_query
 from auth import get_current_user, get_password_hash, verify_password, create_access_token
+import difflib
 from pdf_service import generate_full_report
 
 # ── Initialize DB tables ──
@@ -593,18 +594,44 @@ def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get
     revenue_series = []
     expense_series = []
 
+    # Fetch menu items to resolve canonical names
+    menu_items = db.query(models.MenuItem).filter(models.MenuItem.stall_id == stall_id).all()
+    official_names = {m.item_name.lower().strip(): m.item_name for m in menu_items}
+
     for session in sessions:
         d = session.day_date
         daily_data[d]["total_revenue"] += session.total_revenue or 0
         daily_data[d]["total_expense"] += session.total_expense or 0
         for entry in session.entries:
-            name = entry.item_name or "Unknown"
+            raw_name = entry.item_name or "Unknown"
+            
+            # Robust Canonical Name Resolution
+            low = raw_name.lower().strip()
+            canonical = official_names.get(low)
+            if not canonical:
+                low_ns = low.replace(" ", "")
+                for official_low, official_canonical in official_names.items():
+                    if official_low.replace(" ", "") == low_ns:
+                        canonical = official_canonical
+                        break
+            if not canonical:
+                # Fuzzy fallback
+                valid_list = list(official_names.keys())
+                matches = difflib.get_close_matches(low, valid_list, n=1, cutoff=0.5)
+                if matches:
+                    canonical = official_names[matches[0]]
+                else:
+                    canonical = raw_name
+
+            name = canonical
             if name not in daily_data[d]["items"]:
                 daily_data[d]["items"][name] = {"revenue": 0, "expense": 0, "quantity": 0, "stockout": False, "lost_sales": False}
+            
             if entry.entry_type == "REVENUE":
                 daily_data[d]["items"][name]["revenue"] += entry.value or 0
             else:
                 daily_data[d]["items"][name]["expense"] += entry.value or 0
+                
             daily_data[d]["items"][name]["quantity"] += entry.quantity or 0
             if entry.stockout_flag: daily_data[d]["items"][name]["stockout"] = True
             if entry.lost_sales_flag: daily_data[d]["items"][name]["lost_sales"] = True
@@ -632,12 +659,49 @@ def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get
     for idx in exp_anomalies:
         engine_insights["anomalies"].append(f"Expenses were unusually high on {all_dates[idx]}.")
 
+    # Weekday Pattern Calculation
+    weekday_stats = defaultdict(lambda: defaultdict(list)) # weekday -> item -> [quantities]
+    for dt, data in daily_data.items():
+        try:
+            wd = datetime.strptime(dt, "%Y-%m-%d").strftime("%A")
+            for item_name, idat in data["items"].items():
+                if idat.get("quantity", 0) > 0:
+                    weekday_stats[wd][item_name].append(idat["quantity"])
+        except: continue
+
+    # Current weekday for expectation
+    current_wd = datetime.now().strftime("%A")
+    weekday_expectations = []
+    if current_wd in weekday_stats:
+        for item_name, q_list in weekday_stats[current_wd].items():
+            # Only include if in menu
+            if item_name.lower().strip() in official_names:
+                avg_q = sum(q_list) / len(q_list)
+                if avg_q >= 1: # Only significant items
+                    weekday_expectations.append({
+                        "item": item_name,
+                        "avg_qty": round(avg_q, 1),
+                        "range": f"{max(1, int(avg_q*0.8))}-{int(avg_q*1.2)+1}"
+                    })
+    
+    # Sort expectations by volume
+    weekday_expectations = sorted(weekday_expectations, key=lambda x: x["avg_qty"], reverse=True)[:5]
+    engine_insights["weekday_expectations"] = {
+        "day": current_wd,
+        "items": weekday_expectations
+    }
+
     # Item Demand insights for the period
     items_encountered = set()
     for d_data in daily_data.values():
         items_encountered.update(d_data["items"].keys())
 
     for item in items_encountered:
+        # PURE ITEM BASED: Skip financial ledger items like Udhari
+        # Only analyze if it's an official menu item
+        if item.lower().strip() not in official_names:
+            continue
+            
         # Build historic series for EWMA baseline
         hist = [daily_data[dt]["items"].get(item, {}).get("revenue", 0) for dt in all_dates]
         baseline = analytics_engine.calculate_ewma(hist)
@@ -658,7 +722,7 @@ def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get
                             "observed": idat.get("revenue", 0),
                             "estimated": est["estimated_demand"],
                             "lost": est["lost_sales"],
-                            "reason": est["reason"],
+                            "reason_key": est["reason_key"],
                             "date": dt
                         })
             
@@ -675,7 +739,7 @@ def daily_summary(stall_id: int, days: int = 14, user: models.User = Depends(get
 
         sug = analytics_engine.generate_business_suggestions(item, baseline, baseline, trend, stockout_freq)
         if sug["percentage"] != 0:
-            if not any(s["suggestion"] == sug["suggestion"] for s in engine_insights["suggestions"]):
+            if not any(s["item"] == sug["item"] for s in engine_insights["suggestions"]):
                 engine_insights["suggestions"].append(sug)
 
     # ─────────────────────────────────────────────────────────────────────────────

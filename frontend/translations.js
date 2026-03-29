@@ -38,7 +38,77 @@ const translations = {
     switchShop: "Switch Shop",
     selectLanguage: "Select Language",
     businessBrain: "Your Business Brain",
-    businessBrainSub: "Speak or type to log sales, track udhari,\nask questions in any language."
+    businessBrainSub: "Speak or type to log sales, track udhari,\nask questions in any language.",
+    thirtyDays: "30 Days",
+    outOfStock: "Out of Stock",
+    wentOutOfStockToday: "Went out of stock today.",
+    recordedOn: "Recorded on",
+    loanEstimator: "LOAN ESTIMATOR",
+    creditLimit: "Estimated Credit Limit",
+    threeDayTrend: "3-DAY TREND",
+    sevenDayPattern: "7-DAY PATTERN",
+    stableText: "Sales are steady compared to a few days ago.",
+    risingText: "Your sales are growing — last 3 days were stronger than before.",
+    fallingText: "Sales have dipped recently — check if any items are underperforming.",
+    startGrowthText: "Sales are starting to grow this week.",
+    needMoreData: "Need more days of data to spot trends.",
+    weeklyPatternSub: "Keep recording to unlock weekly patterns.",
+    noActiveDays: "Not enough active days to find a pattern.",
+    bestDayPattern: "Your best sales recently happen on %{day}s (₹%{amt}).",
+    growthStrategySub: "GROWTH STRATEGY (TOMORROW)",
+    stableStrategy: "Trend is stable. Keep stock levels similar to today.",
+    isOutOfStock: "is Out of Stock",
+    usuallyOnDay: "Usually on %{day}s, you sell:",
+    expectedSales: "Expect ~%{range} items",
+    dayExpectation: "DAY EXPECTATION",
+    
+    // Sidebar
+    askTab: "Ask Voice",
+    udhari: "Udhari",
+    
+    // Suggestion templates
+    increase_prep: "Increase %{item} preparation by ~%{pct}% tomorrow.",
+    reduce_prep: "Reduce %{item} preparation by ~%{pct}% tomorrow.",
+    maintain_prep: "Maintain current %{item} levels.",
+    
+    // Reasons
+    reason_strong_demand: "Strong demand often outstrips your current stock.",
+    reason_trend_rising: "Sales trend is rising; prepare for higher volume.",
+    reason_trend_falling: "Recent interest in this item is cooling off.",
+    reason_stable: "Sales are stable.",
+    pm_svanidhi_reason: "Your profit is growing; micro-credit can help you scale fast.",
+    mudra_loan_reason: "You qualify for expansion-tier loans to add more stalls.",
+    shishu_loan_reason: "High revenue suggests high turnover. Bulk buys can save you money.",
+    
+    // Shops Component
+    editShop: "Edit Shop",
+    shopName: "Shop Name",
+    locationOptional: "Location (Optional)",
+    saveShop: "Save Shop",
+    noItemsYet: "No items yet",
+    soldToday: "Sold Today",
+    priceRupees: "Price (₹)",
+    nameAndPriceRequired: "Name and price required",
+    
+    // Udhari Component
+    totalPending: "TOTAL PENDING",
+    people: "PEOPLE",
+    noUdhariRecords: "No udhari records yet.",
+    owes: "Owes",
+    allSettled: "All settled",
+    markPaid: "Mark Paid",
+    clearAll: "Clear All",
+    pending: "PENDING",
+    paid: "PAID",
+    confirmPaid: "Mark as Paid?",
+    confirmPaidSub: "This will mark entry as paid.",
+    
+    // Common Items
+    "Vada pav": "Vada pav",
+    "Samosa": "Samosa",
+    "Chai": "Chai",
+    "Poha": "Poha",
+    "Coffee": "Coffee"
   },
   hi: {
     welcome: "स्वागत है",
@@ -76,7 +146,77 @@ const translations = {
     switchShop: "दुकान बदलें",
     selectLanguage: "भाषा चुनें",
     businessBrain: "आपका व्यापार दिमाग",
-    businessBrainSub: "बिक्री दर्ज करने, उधारी ट्रैक करने के लिए बोलें या लिखें,\nकिसी भी भाषा में प्रश्न पूछें।"
+    businessBrainSub: "बिक्री दर्ज करने, उधारी ट्रैक करने के लिए बोलें या लिखें,\nकिसी भी भाषा में प्रश्न पूछें।",
+    thirtyDays: "30 दिन",
+    outOfStock: "स्टॉक खत्म",
+    wentOutOfStockToday: "आज स्टॉक खत्म हुआ।",
+    recordedOn: "रिकॉर्ड किया गया:",
+    loanEstimator: "लोन अनुमान",
+    creditLimit: "अनुमानित क्रेडिट सीमा",
+    threeDayTrend: "3 दिन का रुझान",
+    sevenDayPattern: "7 दिन का पैटर्न",
+    stableText: "बिक्री पिछले कुछ दिनों की तुलना में स्थिर है।",
+    risingText: "आपकी बिक्री बढ़ रही है - पिछले 3 दिन पहले से मजबूत थे।",
+    fallingText: "बिक्री हाल ही में कम हुई है - जाँच करें कि कोई आइटम कम प्रदर्शन कर रहा है क्या।",
+    startGrowthText: "इस हफ्ते बिक्री बढ़ने लगी है।",
+    needMoreData: "ट्रेंड देखने के लिए और डेटा चाहिए।",
+    weeklyPatternSub: "साप्ताहिक पैटर्न अनलॉक करने के लिए रिकॉर्ड करना जारी रखें।",
+    noActiveDays: "पैटर्न खोजने के लिए पर्याप्त एक्टिव दिन नहीं हैं।",
+    bestDayPattern: "हाल ही में आपकी सबसे अच्छी बिक्री %{day} को (₹%{amt}) हुई है।",
+    growthStrategySub: "कल की विकास रणनीति",
+    stableStrategy: "रुझान स्थिर है। स्टॉक आज जैसा ही रखें।",
+    isOutOfStock: "का स्टॉक खत्म है",
+    usuallyOnDay: "आमतौर पर %{day} को आप बेचते हैं:",
+    expectedSales: "लगभग %{range} आइटम की उम्मीद है",
+    dayExpectation: "आज का अनुमान",
+    
+    // Sidebar
+    askTab: "आवाज़ से पूछें",
+    udhari: "उधारी",
+    
+    // Suggestion templates
+    increase_prep: "कल %{item} की तैयारी ~%{pct}% बढ़ाएं।",
+    reduce_prep: "कल %{item} की तैयारी ~%{pct}% कम करें।",
+    maintain_prep: "%{item} का स्तर वर्तमान जैसा रखें।",
+    
+    // Reasons
+    reason_strong_demand: "भारी मांग अक्सर आपके वर्तमान स्टॉक से ज्यादा होती है।",
+    reason_trend_rising: "बिक्री का रुझान बढ़ रहा है; अधिक बिक्री के लिए तैयार रहें।",
+    reason_trend_falling: "इस आइटम में हाल ही में रुचि कम हुई है।",
+    reason_stable: "बिक्री स्थिर है।",
+    pm_svanidhi_reason: "आपका मुनाफा बढ़ रहा है; माइक्रो-क्रेडिट बढ़ने में मदद कर सकता है।",
+    mudra_loan_reason: "आप नई दुकानें खोलने के लिए बड़े लोन के पात्र हैं।",
+    shishu_loan_reason: "ज्यादा टर्नओवर के संकेत हैं। थोक खरीद से पैसे बचेंगे।",
+    
+    // Shops Component
+    editShop: "दुकान बदलें",
+    shopName: "दुकान का नाम",
+    locationOptional: "स्थान (वैकल्पिक)",
+    saveShop: "दुकान सेव करें",
+    noItemsYet: "अभी कोई आइटम नहीं है",
+    soldToday: "आज बिका",
+    priceRupees: "कीमत (₹)",
+    nameAndPriceRequired: "नाम और कीमत जरूरी है",
+    
+    // Udhari Component
+    totalPending: "कुल उधारी",
+    people: "लोग",
+    noUdhariRecords: "अभी कोई उधारी रिकॉर्ड नहीं है।",
+    owes: "बाकी है",
+    allSettled: "सब हिसाब चुकता",
+    markPaid: "पैसे मिल गए",
+    clearAll: "सब साफ करें",
+    pending: "बाकी",
+    paid: "चुकता",
+    confirmPaid: "पैसे मिल गए?",
+    confirmPaidSub: "यह एंट्री चुकता मान ली जाएगी।",
+    
+    // Common Items
+    "Vada pav": "वड़ा पाव",
+    "Samosa": "समोसा",
+    "Chai": "चाय",
+    "Poha": "पोहा",
+    "Coffee": "कॉफी"
   },
   mr: {
     welcome: "स्वागत आहे",
@@ -114,7 +254,77 @@ const translations = {
     switchShop: "दुकान बदला",
     selectLanguage: "भाषा निवडा",
     businessBrain: "तुमचा व्यवसाय मेंदू",
-    businessBrainSub: "विक्री नोंदवण्यासाठी, उधारी ट्रॅक करण्यासाठी बोला किंवा लिहा,\nकोणत्याही भाषेत प्रश्न विचारा."
+    businessBrainSub: "विक्री नोंदवण्यासाठी, उधारी ट्रॅक करण्यासाठी बोला किंवा लिहा,\nकोणत्याही भाषेत प्रश्न विचारा.",
+    thirtyDays: "30 दिवस",
+    outOfStock: "स्टॉक संपला",
+    wentOutOfStockToday: "आज स्टॉक संपला.",
+    recordedOn: "रेकॉर्ड केले:",
+    loanEstimator: "कर्ज अंदाज",
+    creditLimit: "अंदाजित क्रेडिट मर्यादा",
+    threeDayTrend: "3 दिवसांचा कल",
+    sevenDayPattern: "7 दिवसांचा पॅटर्न",
+    stableText: "विक्री गेल्या काही दिवसांच्या तुलनेत स्थिर आहे.",
+    risingText: "तुमची विक्री वाढत आहे - गेल्या 3 दिवसात विक्री जोमात होती.",
+    fallingText: "विक्री अलीकडे कमी झाली आहे - काही आयटमचे विक्री कमी पडतेय का ते तपासा.",
+    startGrowthText: "या आठवड्यात विक्री वाढू लागली आहे.",
+    needMoreData: "कल तपासण्यासाठी आणखी डेटा आवश्यक आहे.",
+    weeklyPatternSub: "साप्ताहिक पॅटर्न अनलॉक करण्यासाठी रेकॉर्ड करत रहा.",
+    noActiveDays: "पॅटर्न शोधण्यासाठी पुरेसे सक्रिय दिवस नाहीत.",
+    bestDayPattern: "तुमची अलीकडील सर्वोत्तम विक्री %{day} ला (₹%{amt}) झाली आहे.",
+    growthStrategySub: "उद्याची व्यवसाय वाढ",
+    stableStrategy: "कल स्थिर आहे. स्टॉक आजच्यासारखाच ठेवा.",
+    isOutOfStock: "चा स्टॉक संपला आहे",
+    usuallyOnDay: "सामान्यतः %{day} ला तुम्ही विकता:",
+    expectedSales: "सुमारे %{range} नग अपेक्षित आहेत",
+    dayExpectation: "आजचा अंदाज",
+    
+    // Sidebar
+    askTab: "आवाजातून विचारा",
+    udhari: "उधारी",
+    
+    // Suggestion templates
+    increase_prep: "उद्या %{item} ची तयारी ~%{pct}% वाढवा.",
+    reduce_prep: "उद्या %{item} ची तयारी ~%{pct}% कमी करा.",
+    maintain_prep: "%{item} ची पातळी सध्यासारखी ठेवा.",
+    
+    // Reasons
+    reason_strong_demand: "ग्राहकांची मागणी तुमच्या सध्याच्या स्टॉकपेक्षा जास्त आहे.",
+    reason_trend_rising: "विक्रीचा कल वाढत आहे; अधिक विक्रीसाठी तयार रहा.",
+    reason_trend_falling: "या आयटममध्ये अलीकडे रस कमी झाला आहे.",
+    reason_stable: "बिक्री स्थिर आहे.",
+    pm_svanidhi_reason: "तुमचा नफा वाढत आहे; मायक्रो-क्रेडिट प्रगतीसाठी मदत करू शकते.",
+    mudra_loan_reason: "तुम्ही नवीन स्टॉल्स टाकण्यासाठी मोठ्या कर्जास पात्र आहात.",
+    shishu_loan_reason: "जास्त टर्नओव्हरचे संकेत आहेत. घाऊक खरेदीने पैसे वाचतील.",
+    
+    // Shops Component
+    editShop: "दुकान दुरुस्त करा",
+    shopName: "दुकान नाव",
+    locationOptional: "पत्ता (पर्यायी)",
+    saveShop: "दुकान जतन करा",
+    noItemsYet: "अद्याप आयटम नाहीत",
+    soldToday: "आजची विक्री",
+    priceRupees: "किंमत (₹)",
+    nameAndPriceRequired: "नाव आणि किंमत आवश्यक आहे",
+    
+    // Udhari Component
+    totalPending: "एकूण उधारी",
+    people: "लोक",
+    noUdhariRecords: "अद्याप कोणतेही उधारी रेकॉर्ड नाहीत.",
+    owes: "बाकी आहे",
+    allSettled: "सर्व हिशोब पूर्ण",
+    markPaid: "पैसे मिळाले",
+    clearAll: "सर्व क्लिअर करा",
+    pending: "बाकी",
+    paid: "पूर्ण",
+    confirmPaid: "पैसे मिळाले का?",
+    confirmPaidSub: "ही नोंद पूर्ण झाली असे मानण्यात येईल.",
+    
+    // Common Items
+    "Vada pav": "वडा पाव",
+    "Samosa": "समोसा",
+    "Chai": "चाय",
+    "Poha": "पोहे",
+    "Coffee": "कॉफी"
   }
 };
 

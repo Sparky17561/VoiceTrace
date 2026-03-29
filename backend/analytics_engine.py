@@ -40,76 +40,80 @@ def estimate_counterfactual_demand(observed: float, baseline: float, stockout: b
     Section 2 & 3: Corrects observed sales for demand constraints.
     """
     estimated = observed
-    reason = "Normal sales"
+    reason_key = "reason_normal"
     
     if stockout:
         estimated = max(observed, baseline * 1.2)
-        reason = "Early stockout detected; demand estimated at 120% of baseline."
+        reason_key = "reason_stockout"
     
     if lost_sales:
         estimated = baseline * 1.3
-        reason = "Customers were turned away; demand estimated at 130% of baseline."
+        reason_key = "reason_lost_sales"
         
     lost_count = max(0, estimated - observed)
     
     return {
         "estimated_demand": estimated,
         "lost_sales": lost_count,
-        "reason": reason
+        "reason_key": reason_key
     }
 
 def generate_business_suggestions(item_name: str, estimated_demand: float, observed_sales: float, trend: str, stockout_freq: float) -> Dict[str, Any]:
     """
-    Section 7: Strategic next-day prep suggestions.
+    Section 7: Strategic next-day prep suggestions using i18n keys.
     """
-    suggestion = "Maintain current levels."
+    key = "maintain_prep"
     percentage = 0
-    reason = "Sales are stable."
+    reason_key = "reason_stable"
     
     # Rules
     if (estimated_demand > observed_sales) or (stockout_freq > 0.5):
         percentage = 30
-        suggestion = f"Increase {item_name} preparation by ~{percentage}% tomorrow."
-        reason = "Strong demand often outstrips your current stock."
+        key = "increase_prep"
+        reason_key = "reason_strong_demand"
     elif trend == "up":
         percentage = 15
-        suggestion = f"Increase {item_name} preparation by ~{percentage}% tomorrow."
-        reason = "Sales trend is rising; prepare for higher volume."
+        key = "increase_prep"
+        reason_key = "reason_trend_rising"
     elif trend == "down":
-        percentage = -10
-        suggestion = f"Reduce {item_name} preparation by ~10% tomorrow."
-        reason = "Recent interest in this item is cooling off."
+        key = "reduce_prep"
+        percentage = 10
+        reason_key = "reason_trend_falling"
         
     return {
-        "suggestion": suggestion,
+        "item": item_name,
         "percentage": percentage,
-        "reason": reason
+        "suggestion_key": key,
+        "reason_key": reason_key
     }
 
 def get_scheme_recommendation(monthly_profit: float, revenue: float, stall_data: Dict[str, Any] = {}) -> Dict[str, Any]:
     """
-    Evaluates business performance against govt scheme criteria.
+    Evaluates business performance against govt scheme criteria using i18n keys.
     """
-    primary = {
+    scheme = {
+        "scheme_key": "pm_svanidhi",
         "name": "PM SVANidhi Scheme",
         "link": "pmsvanidhi.mohua.gov.in",
         "benefit": "Micro-credit up to ₹50,000",
-        "reason": "Since your monthly profit is currently growing, this lower-interest credit can help you secure daily supplies without a middleman."
+        "reason_key": "pm_svanidhi_reason"
     }
     
     if monthly_profit > 25000:
-        primary = {
-            "name": "Pradhan Mantri Mudra Yojana (PMMY)",
+        scheme = {
+            "scheme_key": "mudra_loan",
+            "name": "PMMY Mudra Loan",
             "link": "mudra.org.in",
-            "benefit": "Business expansion loan up to ₹5 Lakh (Kishore)",
-            "reason": "With a monthly profit of over ₹25,000, you qualify for expansion-tier loans to add more stalls or a larger space."
+            "benefit": "Business expansion loan up to ₹5 Lakh",
+            "reason_key": "mudra_loan_reason"
         }
     elif revenue > 50000:
-         primary = {
+         scheme = {
+            "scheme_key": "shishu_loan",
             "name": "Mudra Yojana (Shishu)",
             "link": "mudra.org.in",
             "benefit": "Capital loan up to ₹50,000",
-            "reason": "Your high revenue suggests high inventory turnover. This loan can help you buy bulk at lower prices."
+            "reason_key": "shishu_loan_reason"
         }
         
-    return primary
+    return scheme

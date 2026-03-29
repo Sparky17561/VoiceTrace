@@ -19,7 +19,7 @@ import i18n from '../../../translations';
 export default function AskScreen({ toggleSidebar }) {
   const { token } = useContext(AuthContext);
   const { C } = useTheme();
-  const { currentDay, activeStall, playAudio } = useContext(AppContext);
+  const { currentDay, activeStall, playAudio, playingUrl } = useContext(AppContext);
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [loading, setLoading] = useState(false);

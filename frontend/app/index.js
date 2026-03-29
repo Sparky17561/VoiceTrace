@@ -6,21 +6,21 @@ import axios from 'axios';
 import { AuthContext } from './_layout';
 
 // ── Core ──
-import { ThemeProvider, useTheme, DARK, LIGHT } from './components/core/theme';
-import { AppProvider } from './components/core/AppContext';
+import { ThemeProvider, useTheme, DARK, LIGHT } from './_components/core/theme';
+import { AppProvider } from './_components/core/AppContext';
 
 // ── Utils ──
-import { API_BASE, SIDEBAR_W, getToday } from './components/utils/constants';
+import { API_BASE, SIDEBAR_W, getToday } from './_components/utils/constants';
 
 // ── Screens ──
-import AuthScreen from './components/auth/AuthScreen';
-import AskScreen from './components/chat/AskScreen';
-import DashboardScreen from './components/dashboard/DashboardScreen';
-import HistoryScreen from './components/history/HistoryScreen';
-import UdhariScreen from './components/udhari/UdhariScreen';
-import ShopsScreen from './components/shops/ShopsScreen';
-import AppSidebar from './components/navigation/AppSidebar';
-import OnboardingScreen from './components/onboarding/OnboardingScreen';
+import AuthScreen from './_components/auth/AuthScreen';
+import AskScreen from './_components/chat/AskScreen';
+import DashboardScreen from './_components/dashboard/DashboardScreen';
+import HistoryScreen from './_components/history/HistoryScreen';
+import UdhariScreen from './_components/udhari/UdhariScreen';
+import ShopsScreen from './_components/shops/ShopsScreen';
+import AppSidebar from './_components/navigation/AppSidebar';
+import OnboardingScreen from './_components/onboarding/OnboardingScreen';
 import i18n from '../translations';
 
 // ── MAIN APP INNER (State & Routing) ──

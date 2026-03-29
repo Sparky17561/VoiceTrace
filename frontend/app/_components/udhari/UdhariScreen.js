@@ -31,10 +31,10 @@ export default function UdhariScreen({ toggleSidebar }) {
   useEffect(() => { fetchUdhari(); }, [activeStall, token]);
 
   const markPaid = async (entryId) => {
-    Alert.alert('Mark as Paid?', 'This will mark the entry as paid and cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(i18n.t('confirmPaid'), i18n.t('confirmPaidSub'), [
+      { text: i18n.t('clear'), style: 'cancel' },
       {
-        text: 'Mark Paid', onPress: async () => {
+        text: i18n.t('markPaid'), onPress: async () => {
           setPayingId(entryId);
           try {
             await axios.put(`${API_BASE}/udhari/entry/${entryId}/pay`, {}, { headers: { Authorization: `Bearer ${token}` } });
@@ -47,10 +47,10 @@ export default function UdhariScreen({ toggleSidebar }) {
   };
 
   const markAllPaid = async (personId) => {
-    Alert.alert('Mark All Paid?', 'All pending entries for this person will be marked paid.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(i18n.t('markAllPaid', { defaultValue: 'Mark All Paid?' }), i18n.t('confirmPaidSub'), [
+      { text: i18n.t('clear'), style: 'cancel' },
       {
-        text: 'Yes, Clear All', onPress: async () => {
+        text: i18n.t('clearAll'), onPress: async () => {
           try {
             await axios.put(`${API_BASE}/udhari/person/${personId}/pay-all`, {}, { headers: { Authorization: `Bearer ${token}` } });
             fetchUdhari();
@@ -81,7 +81,7 @@ export default function UdhariScreen({ toggleSidebar }) {
           }}>
             <View>
               <AppText style={{ color: C.rose, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 6 }}>
-                {i18n.t('net_profit', { defaultValue: 'TOTAL PENDING' })}
+                {i18n.t('totalPending')}
               </AppText>
               <AppText style={{ color: C.rose, fontSize: 34, fontWeight: '900', fontFamily: FONT_MONO }}>₹{totalPending}</AppText>
             </View>
@@ -96,14 +96,14 @@ export default function UdhariScreen({ toggleSidebar }) {
           {/* Section label */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <FontAwesome5 name="users" size={11} color={C.textSub} />
-            <AppText style={{ color: C.textSub, fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>PEOPLE</AppText>
+            <AppText style={{ color: C.textSub, fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>{i18n.t('people')}</AppText>
           </View>
 
           {people.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 48 }}>
               <FontAwesome5 name="handshake" size={32} color={C.textFaint} style={{ marginBottom: 14 }} />
-              <AppText style={{ color: C.textFaint, fontSize: 14 }}>No udhari records yet.</AppText>
-              <AppText style={{ color: C.textFaint, fontSize: 13, marginTop: 4 }}>Add using voice in the Ask tab.</AppText>
+              <AppText style={{ color: C.textFaint, fontSize: 14 }}>{i18n.t('noUdhariRecords')}</AppText>
+              <AppText style={{ color: C.textFaint, fontSize: 13, marginTop: 4 }}>{i18n.t('businessBrainSub')}</AppText>
             </View>
           ) : people.map(p => (
             <View key={p.id} style={{
@@ -133,7 +133,7 @@ export default function UdhariScreen({ toggleSidebar }) {
                       {p.name}
                     </AppText>
                     <AppText style={{ color: p.pending_total > 0 ? C.rose : C.teal, fontSize: 13, fontWeight: '600', marginTop: 2 }}>
-                      {p.pending_total > 0 ? `Owes ₹${p.pending_total}` : 'All settled'}
+                      {p.pending_total > 0 ? `${i18n.t('owes')} ₹${p.pending_total}` : i18n.t('allSettled')}
                     </AppText>
                   </View>
                 </View>
@@ -146,7 +146,7 @@ export default function UdhariScreen({ toggleSidebar }) {
                         borderRadius: 10, borderWidth: 1, borderColor: C.tealBorder,
                       }}
                     >
-                      <AppText style={{ color: C.teal, fontSize: 11, fontWeight: '700' }}>Clear All</AppText>
+                      <AppText style={{ color: C.teal, fontSize: 11, fontWeight: '700' }}>{i18n.t('clearAll')}</AppText>
                     </Pressable>
                   )}
                   <FontAwesome5 name={expandedPerson === p.id ? 'chevron-up' : 'chevron-down'} size={10} color={C.textSub} />
@@ -172,7 +172,7 @@ export default function UdhariScreen({ toggleSidebar }) {
                                 }}>
                                   <FontAwesome5 name={isPending ? 'circle' : 'check'} size={8} color={isPending ? C.rose : C.teal} solid />
                                   <AppText style={{ color: isPending ? C.rose : C.teal, fontSize: 9, fontWeight: '800' }}>
-                                    {isPending ? 'PENDING' : 'PAID'}
+                                    {isPending ? i18n.t('pending') : i18n.t('paid')}
                                   </AppText>
                                 </View>
                                 <AppText style={{ color: C.textFaint, fontSize: 10 }}>
@@ -223,7 +223,7 @@ export default function UdhariScreen({ toggleSidebar }) {
                               >
                                 {payingId === e.id
                                   ? <ActivityIndicator size="small" color={C.teal} />
-                                  : <AppText style={{ color: C.teal, fontSize: 12, fontWeight: '700' }}>Mark Paid</AppText>
+                                  : <AppText style={{ color: C.teal, fontSize: 12, fontWeight: '700' }}>{i18n.t('markPaid')}</AppText>
                                 }
                               </Pressable>
                             )}

@@ -160,7 +160,7 @@ export default function ShopsScreen({ toggleSidebar }) {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <FontAwesome5 name="utensils" size={11} color={C.textSub} />
-                    <AppText style={{ color: C.textSub, fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>MENU ITEMS</AppText>
+                    <AppText style={{ color: C.textSub, fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>{i18n.t('menuItems')}</AppText>
                   </View>
                   <Pressable
                     onPress={() => { setMenuForm({ stallId: stall.id, itemId: null, name: '', price: '' }); setShowMenuModal(true); }}
@@ -171,7 +171,7 @@ export default function ShopsScreen({ toggleSidebar }) {
                     }}
                   >
                     <FontAwesome5 name="plus" size={10} color={C.teal} />
-                    <AppText style={{ color: C.teal, fontSize: 12, fontWeight: '700' }}>Add Item</AppText>
+                    <AppText style={{ color: C.teal, fontSize: 12, fontWeight: '700' }}>{i18n.t('addItem')}</AppText>
                   </Pressable>
                 </View>
 
@@ -192,7 +192,7 @@ export default function ShopsScreen({ toggleSidebar }) {
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                             <FontAwesome5 name="fire" size={10} color={C.amber} />
                             <AppText style={{ color: C.textSub, fontSize: 12, fontWeight: '600' }}>
-                              Sold Today: <AppText style={{ color: C.amber, fontWeight: '800' }}>{Math.round(item.sold_today || 0)}</AppText>
+                              {i18n.t('soldToday')}: <AppText style={{ color: C.amber, fontWeight: '800' }}>{Math.round(item.sold_today || 0)}</AppText>
                             </AppText>
                           </View>
                         </View>
@@ -224,16 +224,16 @@ export default function ShopsScreen({ toggleSidebar }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center' }}>
           <View style={{ backgroundColor: C.surface, borderRadius: 28, margin: 24, padding: 26, paddingBottom: 32 }}>
             <AppText style={{ color: C.text, fontSize: 20, fontWeight: '900', marginBottom: 22 }}>
-              {stallForm.id ? 'Edit Shop' : 'Add Shop'}
+              {stallForm.id ? i18n.t('editShop') : i18n.t('addShop')}
             </AppText>
-            <AuthInput label="Shop Name" value={stallForm.name} onChangeText={t => setStallForm({ ...stallForm, name: t })} placeholder="e.g. Raju Vadapav" />
-            <AuthInput label="Location (Optional)" value={stallForm.location} onChangeText={t => setStallForm({ ...stallForm, location: t })} placeholder="e.g. Bandra East" />
+            <AuthInput label={i18n.t('shopName')} value={stallForm.name} onChangeText={t => setStallForm({ ...stallForm, name: t })} placeholder="e.g. Raju Vadapav" />
+            <AuthInput label={i18n.t('locationOptional')} value={stallForm.location} onChangeText={t => setStallForm({ ...stallForm, location: t })} placeholder="e.g. Bandra East" />
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
               <Pressable onPress={() => setShowStallModal(false)} style={{ flex: 1, padding: 16, borderRadius: 16, backgroundColor: C.bgElevated, alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
-                <AppText style={{ color: C.textSub, fontWeight: '700' }}>Cancel</AppText>
+                <AppText style={{ color: C.textSub, fontWeight: '700' }}>{i18n.t('clear')}</AppText>
               </Pressable>
               <Pressable onPress={saveStall} style={{ flex: 1, padding: 16, borderRadius: 16, backgroundColor: ACCENT, alignItems: 'center', shadowColor: ACCENT, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 6 }}>
-                <AppText style={{ color: '#fff', fontWeight: '800' }}>Save Shop</AppText>
+                <AppText style={{ color: '#fff', fontWeight: '800' }}>{i18n.t('saveShop')}</AppText>
               </Pressable>
             </View>
           </View>
@@ -245,16 +245,16 @@ export default function ShopsScreen({ toggleSidebar }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center' }}>
           <View style={{ backgroundColor: C.surface, borderRadius: 28, margin: 24, padding: 26, paddingBottom: 32 }}>
             <AppText style={{ color: C.text, fontSize: 20, fontWeight: '900', marginBottom: 22 }}>
-              {menuForm.itemId ? 'Edit Item' : 'Add Item'}
+              {menuForm.itemId ? i18n.t('edit') : i18n.t('addItem')}
             </AppText>
-            <AuthInput label="Item Name" value={menuForm.name} onChangeText={t => setMenuForm({ ...menuForm, name: t })} placeholder="e.g. Samosa" />
-            <AuthInput label="Price (₹)" value={menuForm.price} onChangeText={t => setMenuForm({ ...menuForm, price: t })} keyboardType="numeric" placeholder="e.g. 15" />
+            <AuthInput label={i18n.t('addItem')} value={menuForm.name} onChangeText={t => setMenuForm({ ...menuForm, name: t })} placeholder="e.g. Samosa" />
+            <AuthInput label={i18n.t('priceRupees')} value={menuForm.price} onChangeText={t => setMenuForm({ ...menuForm, price: t })} keyboardType="numeric" placeholder="e.g. 15" />
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
               <Pressable onPress={() => setShowMenuModal(false)} style={{ flex: 1, padding: 16, borderRadius: 16, backgroundColor: C.bgElevated, alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
-                <AppText style={{ color: C.textSub, fontWeight: '700' }}>Cancel</AppText>
+                <AppText style={{ color: C.textSub, fontWeight: '700' }}>{i18n.t('clear')}</AppText>
               </Pressable>
               <Pressable onPress={saveMenu} style={{ flex: 1, padding: 16, borderRadius: 16, backgroundColor: C.teal, alignItems: 'center', shadowColor: C.teal, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 6 }}>
-                <AppText style={{ color: '#fff', fontWeight: '800' }}>Save Item</AppText>
+                <AppText style={{ color: '#fff', fontWeight: '800' }}>{i18n.t('addItem')}</AppText>
               </Pressable>
             </View>
           </View>
